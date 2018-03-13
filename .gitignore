@@ -1,2 +1,4 @@
 vendor/github.com/
 vendor/golang.org/
+allocationFollower/vendor/github.com/
+allocationFollower/vendor/golang.org/
