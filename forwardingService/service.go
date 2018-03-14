@@ -5,8 +5,6 @@ import (
 	"log"
 	"os"
 
-	"time"
-
 	"github.com/adragoset/nomad_follower/allocationFollower"
 	nomadApi "github.com/hashicorp/nomad/api"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -25,7 +23,6 @@ func main() {
 	}, "", 0)
 
 	config := nomadApi.DefaultConfig()
-	config.WaitTime = 5 * time.Minute
 
 	client, err := nomadApi.NewClient(config)
 
