@@ -19,7 +19,7 @@ type AllocationFollower struct {
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(client *nomadApi.Client) (a *AllocationFollower, e error) {
+func NewAllocationFollower(client *nomadApi.Client, outChan chan string, errorChan chan string) (a *AllocationFollower, e error) {
 	self, err := client.Agent().Self()
 
 	if err != nil {
@@ -27,7 +27,7 @@ func NewAllocationFollower(client *nomadApi.Client) (a *AllocationFollower, e er
 	}
 
 	id := self.Stats["client"]["node_id"]
-	return &AllocationFollower{Allocations: make(map[string]FollowedAllocation), Client: client, ErrorChan: make(chan string), NodeID: id, OutChan: make(chan string), Quit: make(chan bool)}, nil
+	return &AllocationFollower{Allocations: make(map[string]FollowedAllocation), Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
 }
 
 //Start registers and de registers allocation followers

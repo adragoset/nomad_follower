@@ -2,3 +2,5 @@ vendor/github.com/
 vendor/golang.org/
 allocationFollower/vendor/github.com/
 allocationFollower/vendor/golang.org/
+forwardingService/vendor/github.com/
+forwardingService/vendor/golang.org/
