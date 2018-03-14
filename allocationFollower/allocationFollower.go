@@ -40,14 +40,19 @@ func NewAllocationFollower(outChan *chan string, errorChan *chan string) (a *All
 
 	*errorChan <- fmt.Sprintf("%v", allocs)
 
-	agent := client.Agent()
-	self, err := agent.Self()
-
+	agentName, err := client.Agent().NodeName()
+	nodes, _, err := client.Nodes().List(&nomadApi.QueryOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	id := self.Stats["client"]["node_id"]
+	var id string
+	for _, node := range nodes {
+		if node.Name == agentName {
+			id = node.ID
+		}
+	}
+
 	return &AllocationFollower{Allocations: make(map[string]FollowedAllocation), Config: config, Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
 }
 
