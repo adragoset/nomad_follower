@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
@@ -10,6 +12,7 @@ import (
 //AllocationFollower a container for the list of followed allocations
 type AllocationFollower struct {
 	Allocations map[string]FollowedAllocation
+	Config      *nomadApi.Config
 	Client      *nomadApi.Client
 	ErrorChan   *chan string
 	NodeID      string
@@ -19,7 +22,20 @@ type AllocationFollower struct {
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(client *nomadApi.Client, outChan *chan string, errorChan *chan string) (a *AllocationFollower, e error) {
+func NewAllocationFollower(outChan *chan string, errorChan *chan string) (a *AllocationFollower, e error) {
+
+	config := nomadApi.DefaultConfig()
+	config.Address = os.Getenv("NOMAD_ADDR")
+	config.Region = os.Getenv("NOMAD_REGION")
+	config.Namespace = os.Getenv("NOMAD_NAMESPACE")
+	config.TLSConfig.CACert = os.Getenv("NOMAD_CACERT")
+	config.TLSConfig.ClientCert = os.Getenv("NOMAD_CLIENT_CERT")
+	config.TLSConfig.ClientKey = os.Getenv("NOMAD_CLIENT_KEY")
+	config.TLSConfig.Insecure, _ = strconv.ParseBool(os.Getenv("NOMAD_SKIP_VERIFY"))
+	config.WaitTime = 5 * time.Minute
+
+	client, err := nomadApi.NewClient(config)
+
 	agent := client.Agent()
 	self, err := agent.Self()
 
@@ -28,7 +44,7 @@ func NewAllocationFollower(client *nomadApi.Client, outChan *chan string, errorC
 	}
 
 	id := self.Stats["client"]["node_id"]
-	return &AllocationFollower{Allocations: make(map[string]FollowedAllocation), Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
+	return &AllocationFollower{Allocations: make(map[string]FollowedAllocation), Config: config, Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
 }
 
 //Start registers and de registers allocation followers
