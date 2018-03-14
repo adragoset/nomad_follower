@@ -46,7 +46,7 @@ func main() {
 				fileLogger.Println(message)
 
 			case err := <-allocFollower.ErrorChan:
-				log.Printf("{ \"message\":\"%s\"}", err)
+				fmt.Printf("{ \"message\":\"%s\"}", err)
 			}
 		}
 	}()
