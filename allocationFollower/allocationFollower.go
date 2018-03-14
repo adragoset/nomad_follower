@@ -20,7 +20,8 @@ type AllocationFollower struct {
 
 //NewAllocationFollower Creates a new allocation follower
 func NewAllocationFollower(client *nomadApi.Client, outChan *chan string, errorChan *chan string) (a *AllocationFollower, e error) {
-	self, err := client.Agent().Self()
+	agent := client.Agent()
+	self, err := agent.Self()
 
 	if err != nil {
 		return nil, err
