@@ -36,6 +36,10 @@ func NewAllocationFollower(outChan *chan string, errorChan *chan string) (a *All
 
 	client, err := nomadApi.NewClient(config)
 
+	allocs := client.Allocations()
+
+	*errorChan <- fmt.Sprintf("%v", allocs)
+
 	agent := client.Agent()
 	self, err := agent.Self()
 
