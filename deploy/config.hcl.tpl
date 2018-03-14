@@ -5,6 +5,5 @@ NOMAD_CACERT=/local/ca.pem
 NOMAD_CLIENT_CERT=/local/cert.pem
 NOMAD_CLIENT_KEY=/local/key.pem
 NOMAD_SKIP_VERIFY=false
-NOMAD_TOKEN=
 LOG_FILE=/logs/nomad-forwarder.log
 

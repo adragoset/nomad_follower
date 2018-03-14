@@ -40,7 +40,7 @@ func main() {
 		case message := <-*af.OutChan:
 			fileLogger.Println(message)
 
-		case err := <-*af.ErrorChan:
+		case err := <-errChan:
 			fmt.Printf("{ \"message\":\"%s\"}", err)
 		}
 	}
