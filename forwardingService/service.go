@@ -14,8 +14,15 @@ import (
 
 func main() {
 	//setup the out channel and error channel
-	outChan := make(chan string)
-	errChan := make(chan string)
+	outChan := make(chan string, 1)
+	errChan := make(chan string, 1)
+
+	fileLogger := log.New(&lumberjack.Logger{
+		Filename:   os.Getenv("LOG_FILE"),
+		MaxSize:    50, // megabytes
+		MaxBackups: 1,
+		MaxAge:     1, //days
+	}, "", 0)
 
 	config := nomadApi.DefaultConfig()
 	config.WaitTime = 5 * time.Minute
@@ -26,28 +33,19 @@ func main() {
 		errChan <- fmt.Sprintf("Error occoured configuring nomad api Error:%v", err)
 	}
 
-	allocFollower, err := allocationFollower.NewAllocationFollower(client, outChan, errChan)
+	_, err = allocationFollower.NewAllocationFollower(client, outChan, errChan)
 
 	if err != nil {
 		errChan <- fmt.Sprintf("Error occoured starting AllocationFollower Error:%v", err)
 	}
 
-	fileLogger := log.New(&lumberjack.Logger{
-		Filename:   os.Getenv("LOG_FILE"),
-		MaxSize:    50, // megabytes
-		MaxBackups: 1,
-		MaxAge:     1, //days
-	}, "", 0)
+	for {
+		select {
+		case message := <-outChan:
+			fileLogger.Println(message)
 
-	go func() {
-		for {
-			select {
-			case message := <-allocFollower.OutChan:
-				fileLogger.Println(message)
-
-			case err := <-allocFollower.ErrorChan:
-				fmt.Printf("{ \"message\":\"%s\"}", err)
-			}
+		case err := <-errChan:
+			fmt.Printf("{ \"message\":\"%s\"}", err)
 		}
-	}()
+	}
 }

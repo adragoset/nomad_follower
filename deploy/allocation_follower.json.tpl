@@ -49,6 +49,22 @@
                                 "DestPath": "local/config.env",
                                 "Envvars": true,
                                 "ChangeMode": "restart"
+                            },
+                            {
+
+                                "EmbeddedTmpl": "{{ with secret \"/secret/cluster/root/certificates\" }}{{ .Data.root.cert }}{{ end }}",
+                                "DestPath": "local/ca.pem",
+                                "ChangeMode": "restart"
+                            },
+                            {
+                                "EmbeddedTmpl": "{{ with secret \"/secret/cluster/nomad/certificates\" }}{{ .Data.nomad_cli.cert }}{{ end }}",
+                                "DestPath": "local/cert.pem",
+                                "ChangeMode": "restart"
+                            },
+                            {
+                                "EmbeddedTmpl": "{{ with secret \"/secret/cluster/nomad/certificates\" }}{{ .Data.nomad_cli.key }}{{ end }}",
+                                "DestPath": "local/key.pem",
+                                "ChangeMode": "restart"
                             }
                         ],
                         "Vault": {
