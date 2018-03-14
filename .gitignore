@@ -4,3 +4,5 @@ allocationFollower/vendor/github.com/
 allocationFollower/vendor/golang.org/
 forwardingService/vendor/github.com/
 forwardingService/vendor/golang.org/
+forwardingService/vendor/gopkg.in/natefinch/lumberjack.v2/chown.go
+forwardingService/vendor/gopkg.in/

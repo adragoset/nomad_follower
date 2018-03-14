@@ -3,10 +3,10 @@
 	"ignore": "test",
 	"package": [
 		{
-			"checksumSHA1": "DZJ4O9AT9fgzQqOaZ8Ch0q13E64=",
+			"checksumSHA1": "3t7D8yth++Qc/2PJJumzoykbNlo=",
 			"path": "github.com/adragoset/nomad_follower/allocationFollower",
-			"revision": "28b8e8157b673badef4be1383e079013d84d8b5e",
-			"revisionTime": "2018-03-13T22:10:00Z"
+			"revision": "e885fea3b378ddbd5c99daaabdbb4bdb3273654b",
+			"revisionTime": "2018-03-14T13:43:43Z"
 		},
 		{
 			"checksumSHA1": "CfLsyVELWof4pl156D1TQZG++zg=",
@@ -229,6 +229,12 @@
 			"path": "golang.org/x/crypto/blake2b",
 			"revision": "c4a91bd4f524f10d064139674cf55852e055ad01",
 			"revisionTime": "2018-03-13T19:10:02Z"
+		},
+		{
+			"checksumSHA1": "2FnVZ1894IO0AC4WA2UCvzlGOTQ=",
+			"path": "gopkg.in/natefinch/lumberjack.v2",
+			"revision": "a96e63847dc3c67d17befa69c303767e2f84e54f",
+			"revisionTime": "2017-05-31T16:03:50Z"
 		}
 	],
 	"rootPath": "github.com/adragoset/nomad_follower/forwardingService"
