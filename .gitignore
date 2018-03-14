@@ -6,3 +6,5 @@ forwardingService/vendor/github.com/
 forwardingService/vendor/golang.org/
 forwardingService/vendor/gopkg.in/natefinch/lumberjack.v2/chown.go
 forwardingService/vendor/gopkg.in/
+allocationFollower/vendor/gopkg.in/
+allocationFollower/debug

@@ -223,7 +223,13 @@
 			"path": "golang.org/x/crypto/blake2b",
 			"revision": "182114d582623c1caa54f73de9c7224e23a48487",
 			"revisionTime": "2018-03-12T18:51:34Z"
+		},
+		{
+			"checksumSHA1": "2FnVZ1894IO0AC4WA2UCvzlGOTQ=",
+			"path": "gopkg.in/natefinch/lumberjack.v2",
+			"revision": "a96e63847dc3c67d17befa69c303767e2f84e54f",
+			"revisionTime": "2017-05-31T16:03:50Z"
 		}
 	],
-	"rootPath": "github.com/adragoset/nomad_follower/follower"
+	"rootPath": "github.com/adragoset/nomad_follower/allocationFollower"
 }

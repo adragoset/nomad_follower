@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/adragoset/nomad_follower/allocationFollower"
 	nomadApi "github.com/hashicorp/nomad/api"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -30,7 +29,7 @@ func main() {
 		errChan <- fmt.Sprintf("Error occoured configuring nomad api Error:%v", err)
 	}
 
-	af, err := allocationFollower.NewAllocationFollower(client, &outChan, &errChan)
+	af, err := NewAllocationFollower(client, &outChan, &errChan)
 
 	if err != nil {
 		errChan <- fmt.Sprintf("Error occoured starting AllocationFollower Error:%v", err)
@@ -38,10 +37,10 @@ func main() {
 
 	for {
 		select {
-		case message := <-af.OutChan:
+		case message := <-*af.OutChan:
 			fileLogger.Println(message)
 
-		case err := <-af.ErrorChan:
+		case err := <-*af.ErrorChan:
 			fmt.Printf("{ \"message\":\"%s\"}", err)
 		}
 	}

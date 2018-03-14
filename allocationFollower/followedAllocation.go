@@ -1,4 +1,4 @@
-package allocationFollower
+package main
 
 import nomadApi "github.com/hashicorp/nomad/api"
 
