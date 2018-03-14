@@ -30,8 +30,8 @@
                             "volumes": ["/var/log:/logs:Z"]
                         },
                         "Resources": {
-                            "CPU": 100,
-                            "MemoryMB": 100
+                            "CPU": 200,
+                            "MemoryMB": 350
                         },
                         "Artifacts": [
                             {
