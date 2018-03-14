@@ -11,15 +11,15 @@ import (
 type AllocationFollower struct {
 	Allocations map[string]FollowedAllocation
 	Client      *nomadApi.Client
-	ErrorChan   chan string
+	ErrorChan   *chan string
 	NodeID      string
-	OutChan     chan string
+	OutChan     *chan string
 	Quit        chan bool
 	Ticker      *time.Ticker
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(client *nomadApi.Client, outChan chan string, errorChan chan string) (a *AllocationFollower, e error) {
+func NewAllocationFollower(client *nomadApi.Client, outChan *chan string, errorChan *chan string) (a *AllocationFollower, e error) {
 	self, err := client.Agent().Self()
 
 	if err != nil {
@@ -41,7 +41,7 @@ func (a AllocationFollower) Start(duration time.Duration) {
 			case <-tickChan:
 				err := a.collectAllocations()
 				if err != nil {
-					a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
+					*a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
 				}
 			case <-a.Quit:
 				a.Ticker.Stop()
@@ -69,7 +69,7 @@ func (a AllocationFollower) collectAllocations() error {
 
 	for _, alloc := range allocs {
 		if _, ok := a.Allocations[alloc.ID]; !ok && alloc.DesiredStatus == "run" && alloc.ClientStatus == "running" {
-			falloc := NewFollowedAllocation(alloc, a.Client, &a.ErrorChan, &a.OutChan)
+			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
 		}

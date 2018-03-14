@@ -33,7 +33,7 @@ func main() {
 		errChan <- fmt.Sprintf("Error occoured configuring nomad api Error:%v", err)
 	}
 
-	_, err = allocationFollower.NewAllocationFollower(client, outChan, errChan)
+	af, err := allocationFollower.NewAllocationFollower(client, outChan, errChan)
 
 	if err != nil {
 		errChan <- fmt.Sprintf("Error occoured starting AllocationFollower Error:%v", err)
@@ -41,10 +41,10 @@ func main() {
 
 	for {
 		select {
-		case message := <-outChan:
+		case message := <-af.OutChan:
 			fileLogger.Println(message)
 
-		case err := <-errChan:
+		case err := <-af.ErrorChan:
 			fmt.Printf("{ \"message\":\"%s\"}", err)
 		}
 	}
