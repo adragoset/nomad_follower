@@ -31,7 +31,12 @@
                         },
                         "Resources": {
                             "CPU": 200,
-                            "MemoryMB": 350
+                            "MemoryMB": 350,
+                            "Networks": [
+                                {
+                                    "MBits": 100
+                                }
+                            ]
                         },
                         "Artifacts": [
                             {
