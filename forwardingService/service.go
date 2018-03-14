@@ -30,7 +30,7 @@ func main() {
 		errChan <- fmt.Sprintf("Error occoured configuring nomad api Error:%v", err)
 	}
 
-	af, err := allocationFollower.NewAllocationFollower(client, outChan, errChan)
+	af, err := allocationFollower.NewAllocationFollower(client, &outChan, &errChan)
 
 	if err != nil {
 		errChan <- fmt.Sprintf("Error occoured starting AllocationFollower Error:%v", err)
