@@ -78,6 +78,8 @@ func (a AllocationFollower) collectAllocations() error {
 		return err
 	}
 
+	fmt.Println(fmt.Sprintf("Running Allocations: %v", allocs))
+
 	for _, alloc := range allocs {
 		if _, ok := a.Allocations[alloc.ID]; !ok && alloc.DesiredStatus == "run" && alloc.ClientStatus == "running" {
 			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
