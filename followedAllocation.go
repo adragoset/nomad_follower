@@ -1,6 +1,10 @@
 package main
 
-import nomadApi "github.com/hashicorp/nomad/api"
+import (
+	"fmt"
+
+	nomadApi "github.com/hashicorp/nomad/api"
+)
 
 //FollowedAllocation a container for a followed allocations log process
 type FollowedAllocation struct {
@@ -22,6 +26,8 @@ func (f FollowedAllocation) Start() {
 	for _, tg := range f.Alloc.Job.TaskGroups {
 		for _, task := range tg.Tasks {
 			ft := NewFollowedTask(f.Alloc, f.Client, f.ErrorChan, f.OutputChan, f.Quit, task)
+			fmt.Println(fmt.Sprintf("Following alloc:%s", f.Alloc.Name))
+			fmt.Println(fmt.Sprintf("Following task:%s", task.Name))
 			ft.Start()
 			f.Tasks = append(f.Tasks, ft)
 		}
