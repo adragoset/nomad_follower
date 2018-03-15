@@ -42,7 +42,7 @@ func NewAllocationFollower(outChan *chan string, errorChan *chan string) (a *All
 }
 
 //Start registers and de registers allocation followers
-func (a AllocationFollower) Start(duration time.Duration) {
+func (a *AllocationFollower) Start(duration time.Duration) {
 	a.Ticker = time.NewTicker(duration)
 	tickChan := a.Ticker.C
 
@@ -63,7 +63,7 @@ func (a AllocationFollower) Start(duration time.Duration) {
 }
 
 //Stop stops all followed allocations and exits
-func (a AllocationFollower) Stop() {
+func (a *AllocationFollower) Stop() {
 	a.Quit <- true
 
 	for _, v := range a.Allocations {
@@ -71,7 +71,7 @@ func (a AllocationFollower) Stop() {
 	}
 }
 
-func (a AllocationFollower) collectAllocations() error {
+func (a *AllocationFollower) collectAllocations() error {
 	allocs, _, err := a.Client.Nodes().Allocations(a.NodeID, &nomadApi.QueryOptions{})
 
 	if err != nil {

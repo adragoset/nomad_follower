@@ -27,9 +27,20 @@ func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorC
 }
 
 //Start starts following a task for an allocation
-func (ft FollowedTask) Start() {
-	stdErrStream, stdErrErr := ft.Client.AllocFS().Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
-	stdOutStream, stdOutErr := ft.Client.AllocFS().Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+func (ft *FollowedTask) Start() {
+	fs := ft.Client.AllocFS()
+	files, _, err := fs.List(ft.Alloc, "/local", &nomadApi.QueryOptions{})
+
+	if err != nil {
+		fmt.Println(fmt.Sprintf("Error building log message json Error:%v", err))
+	}
+
+	for _, fname := range files {
+		fmt.Println(fname)
+	}
+
+	stdErrStream, stdErrErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
 	go func() {
 		for {
@@ -71,7 +82,7 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 	return result
 }
 
-func processMessage(frame *nomadApi.StreamFrame, ft FollowedTask) (string, error) {
+func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) (string, error) {
 	n := bytes.IndexByte(frame.Data, 0)
 	message := string(frame.Data[:n])
 

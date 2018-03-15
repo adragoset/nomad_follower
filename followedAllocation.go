@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
@@ -22,12 +20,10 @@ func NewFollowedAllocation(alloc *nomadApi.Allocation, client *nomadApi.Client, 
 }
 
 //Start starts following an allocation
-func (f FollowedAllocation) Start() {
+func (f *FollowedAllocation) Start() {
 	for _, tg := range f.Alloc.Job.TaskGroups {
 		for _, task := range tg.Tasks {
 			ft := NewFollowedTask(f.Alloc, f.Client, f.ErrorChan, f.OutputChan, f.Quit, task)
-			fmt.Println(fmt.Sprintf("Following alloc:%s", f.Alloc.Name))
-			fmt.Println(fmt.Sprintf("Following task:%s", task.Name))
 			ft.Start()
 			f.Tasks = append(f.Tasks, ft)
 		}
@@ -35,6 +31,6 @@ func (f FollowedAllocation) Start() {
 }
 
 //Stop stops tailing all allocation tasks
-func (f FollowedAllocation) Stop() {
+func (f *FollowedAllocation) Stop() {
 	close(f.Quit)
 }
