@@ -6,8 +6,8 @@ ADD . /go/src/github.com/adragoset/nomad_follower
 
 RUN set -ex \
     && go get github.com/kardianos/govendor \
-    && cd /go/src/github.com/adragoset/nomad_follower/allocationFollower \
+    && cd /go/src/github.com/adragoset/nomad_follower \
     && govendor install \
     && go install
 
-CMD allocationFollower
+CMD nomad_follower

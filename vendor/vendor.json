@@ -17,8 +17,8 @@
 		{
 			"checksumSHA1": "TyROg1M78m4jlRlUQk70gtUv2E4=",
 			"path": "github.com/hashicorp/consul/api",
-			"revision": "0e3c41738dae5636c458b3fabcc69b1cb64b8a1c",
-			"revisionTime": "2018-03-09T13:37:57Z"
+			"revision": "844a5fe8c0646f454021f49245d8b4049b696b6e",
+			"revisionTime": "2018-03-14T11:03:21Z"
 		},
 		{
 			"checksumSHA1": "pP0b9eRHl4ZFD4zTcWxTZH4CPq0=",
@@ -131,50 +131,50 @@
 		{
 			"checksumSHA1": "Qrz7cOPSDxSCSOsqMRTMAThXxwQ=",
 			"path": "github.com/hashicorp/nomad/acl",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
-			"checksumSHA1": "+oWujx63lnw2aAErI/O4C8YjLZw=",
+			"checksumSHA1": "+Vu+EYDeF9TaOSHgwA262OCEAk4=",
 			"path": "github.com/hashicorp/nomad/api",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
 			"checksumSHA1": "6WKFd2EIeFAPc8u6oXSBHmCoOdc=",
 			"path": "github.com/hashicorp/nomad/api/contexts",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
 			"checksumSHA1": "9XjFYzxuINU48//TjgSiv0NnrHY=",
 			"path": "github.com/hashicorp/nomad/helper",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
 			"checksumSHA1": "/abSFQm1CgU95LBKztd9PaZ4zS0=",
 			"path": "github.com/hashicorp/nomad/helper/args",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
 			"checksumSHA1": "6iI12V74fnwcDj5qi5pax+h34b0=",
 			"path": "github.com/hashicorp/nomad/helper/flatmap",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
 			"checksumSHA1": "UQF8iQ6GxD14xIdmuUfPZUuM4QE=",
 			"path": "github.com/hashicorp/nomad/helper/uuid",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
-			"checksumSHA1": "U+rmEOThHnIx+K+ZlpYHsiCkshQ=",
+			"checksumSHA1": "fNqZgv7THykhJBIe4SlyAlschpk=",
 			"path": "github.com/hashicorp/nomad/nomad/structs",
-			"revision": "89845b3b516b870b7953380789d58f98da314726",
-			"revisionTime": "2018-03-12T23:25:49Z"
+			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
+			"revisionTime": "2018-03-14T23:41:46Z"
 		},
 		{
 			"checksumSHA1": "mz0v+h518B+gJLa9fRXQxCcipS4=",
@@ -221,8 +221,8 @@
 		{
 			"checksumSHA1": "ppPg0bIlBAVJy0Pn13BfBnkp9V4=",
 			"path": "golang.org/x/crypto/blake2b",
-			"revision": "182114d582623c1caa54f73de9c7224e23a48487",
-			"revisionTime": "2018-03-12T18:51:34Z"
+			"revision": "21652f85b0fdddb6c2b6b77a5beca5c5a908174a",
+			"revisionTime": "2018-03-14T17:20:41Z"
 		},
 		{
 			"checksumSHA1": "2FnVZ1894IO0AC4WA2UCvzlGOTQ=",
@@ -231,5 +231,5 @@
 			"revisionTime": "2017-05-31T16:03:50Z"
 		}
 	],
-	"rootPath": "github.com/adragoset/nomad_follower/allocationFollower"
+	"rootPath": "github.com/adragoset/nomad_follower"
 }
