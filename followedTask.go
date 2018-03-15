@@ -43,19 +43,23 @@ func (ft *FollowedTask) Start() {
 		for {
 			select {
 			case stdErrMsg := <-stdErrStream:
-				message, err := processMessage(stdErrMsg, ft)
+				messages, err := processMessage(stdErrMsg, ft)
 				if err != nil {
 					*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 				} else {
-					*ft.OutputChan <- message
+					for _, message := range messages {
+						*ft.OutputChan <- message
+					}
 				}
 
 			case stdOutMsg := <-stdOutStream:
-				message, err := processMessage(stdOutMsg, ft)
+				messages, err := processMessage(stdOutMsg, ft)
 				if err != nil {
 					*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 				} else {
-					*ft.OutputChan <- message
+					for _, message := range messages {
+						*ft.OutputChan <- message
+					}
 				}
 
 			case errErr := <-stdErrErr:
@@ -79,14 +83,29 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 	return result
 }
 
-func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) (string, error) {
-	message := string(frame.Data[:])
+func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, error) {
+	messages := strings.Split(string(frame.Data[:]), "/n")
+	jsons := make([]string, 0)
+	for _, message := range messages {
 
-	if isJSON(message) {
-		return addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
+		if isJSON(message) {
+			json, err := addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
+			if err != nil {
+				*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+			} else {
+				jsons = append(jsons, json)
+			}
+		}
+
+		s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
+		if err != nil {
+			*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+		} else {
+			jsons = append(jsons, s)
+		}
 	}
 
-	return addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
+	return jsons, nil
 }
 
 func isJSON(s string) bool {
