@@ -22,12 +22,11 @@ func main() {
 	}, "", 0)
 
 	af, err := NewAllocationFollower(&outChan, &errChan)
-
-	af.Start(time.Second * 5)
-
 	if err != nil {
 		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
 	}
+
+	af.Start(time.Second * 5)
 
 	if af != nil {
 		for {

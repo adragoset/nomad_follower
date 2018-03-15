@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
 )
@@ -28,7 +29,14 @@ func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorC
 
 //Start starts following a task for an allocation
 func (ft *FollowedTask) Start() {
-	fs := ft.Client.AllocFS()
+	config := nomadApi.DefaultConfig()
+	config.WaitTime = 5 * time.Minute
+	client, err := nomadApi.NewClient(config)
+	if err != nil {
+		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
+	}
+
+	fs := client.AllocFS()
 	files, _, err := fs.List(ft.Alloc, "/local", &nomadApi.QueryOptions{})
 
 	if err != nil {
