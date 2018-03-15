@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -81,8 +80,7 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 }
 
 func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) (string, error) {
-	n := bytes.IndexByte(frame.Data, 0)
-	message := string(frame.Data[:n])
+	message := string(frame.Data[:])
 
 	if isJSON(message) {
 		return addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
@@ -115,8 +113,7 @@ func addTagsJSON(allocid string, message string, serviceTags []string) (string, 
 		return "", err
 	}
 
-	n := bytes.IndexByte(result, 0)
-	return string(result[:n]), nil
+	return string(result[:]), nil
 }
 
 func addTagsString(allocid string, message string, serviceTags []string) (string, error) {
@@ -131,6 +128,5 @@ func addTagsString(allocid string, message string, serviceTags []string) (string
 		return "", err
 	}
 
-	n := bytes.IndexByte(result, 0)
-	return string(result[:n]), nil
+	return string(result[:]), nil
 }
