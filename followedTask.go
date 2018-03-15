@@ -21,9 +21,9 @@ type FollowedTask struct {
 }
 
 //NewFollowedTask creats a new followed task
-func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan *chan string, output *chan string, quit chan struct{}, task *nomadApi.Task) FollowedTask {
+func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan *chan string, output *chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
 	serviceTags := collectServiceTags(task.Services)
-	return FollowedTask{Alloc: alloc, Task: task, Quit: quit, ServiceTags: serviceTags, OutputChan: output}
+	return &FollowedTask{Alloc: alloc, Task: task, Quit: quit, ServiceTags: serviceTags, OutputChan: output}
 }
 
 //Start starts following a task for an allocation

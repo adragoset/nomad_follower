@@ -9,7 +9,7 @@ import (
 
 //AllocationFollower a container for the list of followed allocations
 type AllocationFollower struct {
-	Allocations map[string]FollowedAllocation
+	Allocations map[string]*FollowedAllocation
 	Config      *nomadApi.Config
 	Client      *nomadApi.Client
 	ErrorChan   *chan string
@@ -38,7 +38,7 @@ func NewAllocationFollower(outChan *chan string, errorChan *chan string) (a *All
 	}
 
 	id := self.Stats["client"]["node_id"]
-	return &AllocationFollower{Allocations: make(map[string]FollowedAllocation), Config: config, Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
+	return &AllocationFollower{Allocations: make(map[string]*FollowedAllocation), Config: config, Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
 }
 
 //Start registers and de registers allocation followers
@@ -77,8 +77,6 @@ func (a AllocationFollower) collectAllocations() error {
 	if err != nil {
 		return err
 	}
-
-	fmt.Println(fmt.Sprintf("Running Allocations: %v", allocs))
 
 	for _, alloc := range allocs {
 		if _, ok := a.Allocations[alloc.ID]; !ok && alloc.DesiredStatus == "run" && alloc.ClientStatus == "running" {
