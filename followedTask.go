@@ -37,16 +37,6 @@ func (ft *FollowedTask) Start() {
 	}
 
 	fs := client.AllocFS()
-	files, _, err := fs.List(ft.Alloc, "/local", &nomadApi.QueryOptions{})
-
-	if err != nil {
-		fmt.Println(fmt.Sprintf("Error building log message json Error:%v", err))
-	}
-
-	for _, fname := range files {
-		fmt.Println(fname)
-	}
-
 	stdErrStream, stdErrErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
