@@ -84,7 +84,7 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 }
 
 func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, error) {
-	messages := strings.Split(string(frame.Data[:]), "/n")
+	messages := strings.Split(string(frame.Data[:]), "\n")
 	jsons := make([]string, 0)
 	for _, message := range messages {
 
