@@ -52,7 +52,9 @@ func createLogFile() {
 	// create file if not exists
 	if os.IsNotExist(err) {
 		var file, err = os.Create(path)
-		if isError(err) { return }
+		if err != nil {
+			fmt.Errorf("Error creating log file Error:%v", err)
+		}
 		defer file.Close()
 	}
 
