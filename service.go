@@ -10,6 +10,9 @@ import (
 )
 
 func main() {
+
+	createLogFile()
+
 	//setup the out channel and error channel
 	outChan := make(chan string)
 	errChan := make(chan string)
@@ -39,4 +42,19 @@ func main() {
 			}
 		}
 	}
+}
+
+func createLogFile() {
+	path := os.Getenv("LOG_FILE")
+	// detect if file exists
+	var _, err = os.Stat(path)
+
+	// create file if not exists
+	if os.IsNotExist(err) {
+		var file, err = os.Create(path)
+		if isError(err) { return }
+		defer file.Close()
+	}
+
+	fmt.Println("==> done creating log file", path)
 }
