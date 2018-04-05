@@ -24,7 +24,7 @@ func main() {
 		MaxAge:     1,
 	}, "", 0)
 
-	af, err := NewAllocationFollower(&outChan, &errChan)
+	af, err := NewAllocationFollower(outChan, errChan)
 	if err != nil {
 		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
 	}
@@ -34,10 +34,10 @@ func main() {
 	if af != nil {
 		for {
 			select {
-			case message := <-*af.OutChan:
+			case message := <-af.OutChan:
 				fileLogger.Println(message)
 
-			case err := <-*af.ErrorChan:
+			case err := <-af.ErrorChan:
 				fmt.Printf("{ \"message\":\"%s\"}", err)
 			}
 		}

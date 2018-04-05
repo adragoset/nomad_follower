@@ -12,15 +12,15 @@ type AllocationFollower struct {
 	Allocations map[string]*FollowedAllocation
 	Config      *nomadApi.Config
 	Client      *nomadApi.Client
-	ErrorChan   *chan string
+	ErrorChan   chan string
 	NodeID      string
-	OutChan     *chan string
+	OutChan     chan string
 	Quit        chan bool
 	Ticker      *time.Ticker
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(outChan *chan string, errorChan *chan string) (a *AllocationFollower, e error) {
+func NewAllocationFollower(outChan chan string, errorChan chan string) (a *AllocationFollower, e error) {
 
 	config := nomadApi.DefaultConfig()
 	config.WaitTime = 5 * time.Minute
@@ -52,7 +52,7 @@ func (a *AllocationFollower) Start(duration time.Duration) {
 			case <-tickChan:
 				err := a.collectAllocations()
 				if err != nil {
-					*a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
+					a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
 				}
 			case <-a.Quit:
 				a.Ticker.Stop()

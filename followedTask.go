@@ -13,15 +13,15 @@ import (
 type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
 	Client      *nomadApi.Client
-	ErrorChan   *chan string
-	OutputChan  *chan string
+	ErrorChan   chan string
+	OutputChan  chan string
 	Quit        chan struct{}
 	ServiceTags []string
 	Task        *nomadApi.Task
 }
 
 //NewFollowedTask creats a new followed task
-func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan *chan string, output *chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
+func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
 	serviceTags := collectServiceTags(task.Services)
 	return &FollowedTask{Alloc: alloc, Task: task, Quit: quit, ServiceTags: serviceTags, OutputChan: output}
 }
@@ -45,28 +45,28 @@ func (ft *FollowedTask) Start() {
 			case stdErrMsg := <-stdErrStream:
 				messages, err := processMessage(stdErrMsg, ft)
 				if err != nil {
-					*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 				} else {
 					for _, message := range messages {
-						*ft.OutputChan <- message
+						ft.OutputChan <- message
 					}
 				}
 
 			case stdOutMsg := <-stdOutStream:
 				messages, err := processMessage(stdOutMsg, ft)
 				if err != nil {
-					*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 				} else {
 					for _, message := range messages {
-						*ft.OutputChan <- message
+						ft.OutputChan <- message
 					}
 				}
 
 			case errErr := <-stdErrErr:
-				*ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
+				ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
 
 			case outErr := <-stdOutErr:
-				*ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
+				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
 
 			}
 		}
@@ -91,7 +91,7 @@ func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, er
 		if isJSON(message) {
 			json, err := addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
 			if err != nil {
-				*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+				ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 			} else {
 				jsons = append(jsons, json)
 			}
@@ -99,7 +99,7 @@ func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, er
 
 		s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
 		if err != nil {
-			*ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+			ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 		} else {
 			jsons = append(jsons, s)
 		}
