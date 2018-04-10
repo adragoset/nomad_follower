@@ -26,8 +26,7 @@
                         "Driver": "docker",
                         "Config": {
                             "image": "npdsoftwaredev/nomad_follower:[[.containerRef]]",
-                            "network_mode": "cluster_network",
-                            "volumes": ["/var/log:/logs:Z"]
+                            "network_mode": "cluster_network"
                         },
                         "Resources": {
                             "CPU": 200,
