@@ -123,7 +123,7 @@ func getJSONMessage(s string) map[string]interface{} {
 func addTagsJSON(allocid string, message string, serviceTags []string) (string, error) {
 	js := getJSONMessage(message)
 
-	js["syslog.appname"] = strings.Join(serviceTags[:], ",")
+	js["service_name"] = strings.Join(serviceTags[:], ",")
 	js["allocid"] = allocid
 
 	result, err := json.Marshal(js)
@@ -138,7 +138,7 @@ func addTagsJSON(allocid string, message string, serviceTags []string) (string, 
 func addTagsString(allocid string, message string, serviceTags []string) (string, error) {
 	js := make(map[string]interface{})
 	js["message"] = message
-	js["syslog.appname"] = strings.Join(serviceTags[:], ",")
+	js["service_name"] = strings.Join(serviceTags[:], ",")
 	js["allocid"] = allocid
 
 	result, err := json.Marshal(js)

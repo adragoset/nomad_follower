@@ -72,6 +72,7 @@ func (a *AllocationFollower) Stop() {
 }
 
 func (a *AllocationFollower) collectAllocations() error {
+	_ = fmt.Sprintf("{ \"message\":\"%s\"}", "Collecting allocations")
 	allocs, _, err := a.Client.Nodes().Allocations(a.NodeID, &nomadApi.QueryOptions{})
 
 	if err != nil {
@@ -79,7 +80,8 @@ func (a *AllocationFollower) collectAllocations() error {
 	}
 
 	for _, alloc := range allocs {
-		if _, ok := a.Allocations[alloc.ID]; !ok && alloc.DesiredStatus == "run" && alloc.ClientStatus == "running" {
+		record := a.Allocations[alloc.ID]
+		if record != nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
 			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
@@ -98,7 +100,7 @@ func (a *AllocationFollower) collectAllocations() error {
 
 func containsValidAlloc(id string, allocs []*nomadApi.Allocation) bool {
 	for _, alloc := range allocs {
-		if alloc.ID == id && alloc.DesiredStatus == "run" && alloc.ClientStatus == "running" {
+		if alloc.ID == id && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
 			return true
 		}
 	}
