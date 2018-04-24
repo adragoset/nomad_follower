@@ -50,6 +50,7 @@ func (a *AllocationFollower) Start(duration time.Duration) {
 		for {
 			select {
 			case <-tickChan:
+				_, _ = fmt.Printf("{ \"message\":\"%s\"}", "Collecting allocations")
 				err := a.collectAllocations()
 				if err != nil {
 					a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
@@ -72,7 +73,6 @@ func (a *AllocationFollower) Stop() {
 }
 
 func (a *AllocationFollower) collectAllocations() error {
-	_ = fmt.Sprintf("{ \"message\":\"%s\"}", "Collecting allocations")
 	allocs, _, err := a.Client.Nodes().Allocations(a.NodeID, &nomadApi.QueryOptions{})
 
 	if err != nil {
@@ -81,7 +81,9 @@ func (a *AllocationFollower) collectAllocations() error {
 
 	for _, alloc := range allocs {
 		record := a.Allocations[alloc.ID]
-		if record != nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
+		if record == nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
+			message := fmt.Sprintf("Following Allocation: %s", alloc.Name)
+			_, _ = fmt.Printf("{ \"message\":\"%s\"}", message)
 			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
