@@ -38,7 +38,7 @@ func main() {
 				fileLogger.Println(message)
 
 			case err := <-af.ErrorChan:
-				fmt.Printf("{ \"message\":\"%s\"}", err)
+				fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
 			}
 		}
 	}
@@ -58,5 +58,5 @@ func createLogFile() {
 		defer file.Close()
 	}
 
-	fmt.Println("==> done creating log file", path)
+	fmt.Println("{ \"message\":\"==> done creating log file\"}", path)
 }

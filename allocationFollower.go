@@ -44,18 +44,18 @@ func NewAllocationFollower(outChan chan string, errorChan chan string) (a *Alloc
 //Start registers and de registers allocation followers
 func (a *AllocationFollower) Start(duration time.Duration) {
 	a.Ticker = time.NewTicker(duration)
-	tickChan := a.Ticker.C
 
 	go func() {
 		for {
 			select {
-			case <-tickChan:
-				_, _ = fmt.Printf("{ \"message\":\"%s\"}", "Collecting allocations")
+			case <-a.Ticker.C:
 				err := a.collectAllocations()
 				if err != nil {
 					a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
 				}
 			case <-a.Quit:
+				message := fmt.Sprintf("{ \"message\":\"%s\"}", "Stopping Allocation Follower")
+				_, _ = fmt.Println(message)
 				a.Ticker.Stop()
 				return
 			}
@@ -82,8 +82,9 @@ func (a *AllocationFollower) collectAllocations() error {
 	for _, alloc := range allocs {
 		record := a.Allocations[alloc.ID]
 		if record == nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
-			message := fmt.Sprintf("Following Allocation: %s", alloc.Name)
-			_, _ = fmt.Printf("{ \"message\":\"%s\"}", message)
+			message := fmt.Sprintf("Following Allocation: %s ID:%s", alloc.Name, alloc.ID)
+			message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
+			_, _ = fmt.Println(message)
 			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
@@ -92,6 +93,9 @@ func (a *AllocationFollower) collectAllocations() error {
 
 	for k, fa := range a.Allocations {
 		if !containsValidAlloc(k, allocs) {
+			message := fmt.Sprintf("Stopping Allocation: %s ID:%s", fa.Alloc.Name, fa.Alloc.ID)
+			message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
+			_, _ = fmt.Println(message)
 			fa.Stop()
 			delete(a.Allocations, k)
 		}

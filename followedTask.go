@@ -32,12 +32,12 @@ func (ft *FollowedTask) Start() {
 	config.WaitTime = 5 * time.Minute
 	client, err := nomadApi.NewClient(config)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
+		ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
 	}
 
 	fs := client.AllocFS()
 	stdErrStream, stdErrErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
-	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
 	go func() {
 		for {
@@ -87,21 +87,22 @@ func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, er
 	messages := strings.Split(string(frame.Data[:]), "\n")
 	jsons := make([]string, 0)
 	for _, message := range messages {
-
-		if isJSON(message) {
-			json, err := addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
-			if err != nil {
-				ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+		if message != "" && message != "\n" {
+			if isJSON(message) {
+				json, err := addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
+				if err != nil {
+					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+				} else {
+					jsons = append(jsons, json)
+				}
 			} else {
-				jsons = append(jsons, json)
+				s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
+				if err != nil {
+					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+				} else {
+					jsons = append(jsons, s)
+				}
 			}
-		}
-
-		s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
-		if err != nil {
-			ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-		} else {
-			jsons = append(jsons, s)
 		}
 	}
 
