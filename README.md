@@ -12,4 +12,8 @@ nomad_follower will stop following completed allocations and will start followin
 
 nomad_follower can be deployed with nomad in as a system task group along with a log collector. The aggregate log file can then be shared with the log collector by writing the aggregate log file into the shared allocation folder. 
 
+nomad_follower formats log entries as json formatted logs. It will convert string formatted logs to json formatted logs by plassing the log entry in the ```message``` key. 
+
+nomad_follower adds a ```service_name``` key that contains the listed service names for a task.
+
 Using nomad_follower prevents the cluster operator from having to run a log collector in every task group for every task on a worker while still allowing nomad to handle the logs for each allocation. 
