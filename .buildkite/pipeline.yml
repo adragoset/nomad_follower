@@ -1,6 +1,6 @@
 steps:
   - label: ':hammer: Build Nomad Follower'
-    command: 'chmod +x build.sh && build.sh -n cluster_network -s $BUILDKITE_COMMIT -b $BUILDKITE_BRANCH -t $BUILDKITE_TAG'
+    command: 'chmod +x build.sh && ./build.sh -n cluster_network -s $BUILDKITE_COMMIT -b $BUILDKITE_BRANCH -t $BUILDKITE_TAG'
     plugins:
       docker-login#v2.0.0:
         username: devopsintralox
