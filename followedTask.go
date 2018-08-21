@@ -41,50 +41,50 @@ func (ft *FollowedTask) Start() {
 
 	go func() {
 		for {
-			_, ok := (<-ft.Quit)
-			if ok {
-				select {
-				case stdErrMsg, stdErrOk := <-stdErrStream:
-					if stdErrOk {
-						messages, err := processMessage(stdErrMsg, ft)
-						if err != nil {
-							ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-						} else {
-							for _, message := range messages {
-								ft.OutputChan <- message
-							}
-						}
-					} else {
-						stdErrStream, stdErrErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
-					}
 
-				case stdOutMsg, stdOutOk := <-stdOutStream:
-					if stdOutOk {
-						messages, err := processMessage(stdOutMsg, ft)
-						if err != nil {
-							ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-						} else {
-							for _, message := range messages {
-								ft.OutputChan <- message
-							}
-						}
-					} else {
-						stdOutStream, stdOutErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
-					}
-
-				case errErr := <-stdErrErr:
-					ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
-
-				case outErr := <-stdOutErr:
-					ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
-				default:
-					message := fmt.Sprintf("Processing Allocation:%s ID:%s Task:%s", ft.Alloc.Name, ft.Alloc.ID, ft.Task.Name)
-					message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-					_, _ = fmt.Println(message)
-					time.Sleep(10 * time.Second)
+			select {
+			case _, ok := <-ft.Quit:
+				if !ok {
+					return
 				}
-			} else {
-				return
+			case stdErrMsg, stdErrOk := <-stdErrStream:
+				if stdErrOk {
+					messages, err := processMessage(stdErrMsg, ft)
+					if err != nil {
+						ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+					} else {
+						for _, message := range messages {
+							ft.OutputChan <- message
+						}
+					}
+				} else {
+					stdErrStream, stdErrErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+				}
+
+			case stdOutMsg, stdOutOk := <-stdOutStream:
+				if stdOutOk {
+					messages, err := processMessage(stdOutMsg, ft)
+					if err != nil {
+						ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+					} else {
+						for _, message := range messages {
+							ft.OutputChan <- message
+						}
+					}
+				} else {
+					stdOutStream, stdOutErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+				}
+
+			case errErr := <-stdErrErr:
+				ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
+
+			case outErr := <-stdOutErr:
+				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
+			default:
+				message := fmt.Sprintf("Processing Allocation:%s ID:%s Task:%s", ft.Alloc.Name, ft.Alloc.ID, ft.Task.Name)
+				message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
+				_, _ = fmt.Println(message)
+				time.Sleep(10 * time.Second)
 			}
 		}
 	}()

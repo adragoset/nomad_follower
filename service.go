@@ -29,7 +29,7 @@ func main() {
 		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
 	}
 
-	af.Start(time.Second * 5)
+	af.Start(time.Second * 30)
 
 	if af != nil {
 		for {
