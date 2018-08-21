@@ -131,50 +131,50 @@
 		{
 			"checksumSHA1": "Qrz7cOPSDxSCSOsqMRTMAThXxwQ=",
 			"path": "github.com/hashicorp/nomad/acl",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
-			"checksumSHA1": "+Vu+EYDeF9TaOSHgwA262OCEAk4=",
+			"checksumSHA1": "dmtWghQ1Vsi/Eu2x3e1mF6p5pQA=",
 			"path": "github.com/hashicorp/nomad/api",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
 			"checksumSHA1": "6WKFd2EIeFAPc8u6oXSBHmCoOdc=",
 			"path": "github.com/hashicorp/nomad/api/contexts",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
 			"checksumSHA1": "9XjFYzxuINU48//TjgSiv0NnrHY=",
 			"path": "github.com/hashicorp/nomad/helper",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
 			"checksumSHA1": "/abSFQm1CgU95LBKztd9PaZ4zS0=",
 			"path": "github.com/hashicorp/nomad/helper/args",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
 			"checksumSHA1": "6iI12V74fnwcDj5qi5pax+h34b0=",
 			"path": "github.com/hashicorp/nomad/helper/flatmap",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
 			"checksumSHA1": "UQF8iQ6GxD14xIdmuUfPZUuM4QE=",
 			"path": "github.com/hashicorp/nomad/helper/uuid",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
-			"checksumSHA1": "fNqZgv7THykhJBIe4SlyAlschpk=",
+			"checksumSHA1": "qxFjJMDHlvVxyMQGvU2p1nOMtXs=",
 			"path": "github.com/hashicorp/nomad/nomad/structs",
-			"revision": "2f325cff4e24e5b30d15c50b0e40dc67ecd4a260",
-			"revisionTime": "2018-03-14T23:41:46Z"
+			"revision": "499cad6a76ecbf5860f4d3f69d730d35d60bd47b",
+			"revisionTime": "2018-08-20T23:21:13Z"
 		},
 		{
 			"checksumSHA1": "mz0v+h518B+gJLa9fRXQxCcipS4=",
