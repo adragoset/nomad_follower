@@ -73,6 +73,10 @@ func (a *AllocationFollower) Stop() {
 }
 
 func (a *AllocationFollower) collectAllocations() error {
+	message := fmt.Sprintf("Collecting Allocations")
+	message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
+	_, _ = fmt.Println(message)
+
 	allocs, _, err := a.Client.Nodes().Allocations(a.NodeID, &nomadApi.QueryOptions{})
 
 	if err != nil {
@@ -82,9 +86,6 @@ func (a *AllocationFollower) collectAllocations() error {
 	for _, alloc := range allocs {
 		record := a.Allocations[alloc.ID]
 		if record == nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
-			message := fmt.Sprintf("Following Allocation: %s ID:%s", alloc.Name, alloc.ID)
-			message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-			_, _ = fmt.Println(message)
 			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
@@ -93,9 +94,6 @@ func (a *AllocationFollower) collectAllocations() error {
 
 	for k, fa := range a.Allocations {
 		if !containsValidAlloc(k, allocs) {
-			message := fmt.Sprintf("Stopping Allocation: %s ID:%s", fa.Alloc.Name, fa.Alloc.ID)
-			message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-			_, _ = fmt.Println(message)
 			fa.Stop()
 			delete(a.Allocations, k)
 		}
