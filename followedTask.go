@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bcampbell/fuzzytime"
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
@@ -32,6 +33,7 @@ func (ft *FollowedTask) Start() {
 	config.WaitTime = 5 * time.Minute
 	client, err := nomadApi.NewClient(config)
 	if err != nil {
+		// TODO review -- this should be json in json given output wrapping + needs a date
 		ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
 	}
 
@@ -40,8 +42,14 @@ func (ft *FollowedTask) Start() {
 	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
 	go func() {
-		for {
+		var err error
+		var messages []string
+		// buffers to hold partial entries while waiting for more data
+		// TODO set capacity as top level constant, maybe 100? depends heavily on log volume
+		var multilineOutBuf = make([]string, 0, 10)
+		var multilineErrBuf = make([]string, 0, 10)
 
+		for {
 			select {
 			case _, ok := <-ft.Quit:
 				if !ok {
@@ -49,7 +57,7 @@ func (ft *FollowedTask) Start() {
 				}
 			case stdErrMsg, stdErrOk := <-stdErrStream:
 				if stdErrOk {
-					messages, err := processMessage(stdErrMsg, ft)
+					messages, multilineErrBuf, err = processMessage(stdErrMsg, ft, multilineErrBuf)
 					if err != nil {
 						ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 					} else {
@@ -58,12 +66,14 @@ func (ft *FollowedTask) Start() {
 						}
 					}
 				} else {
+					// TODO before re-initializing flush multiline buf
+					// TODO keep offset to minimize writing duplicate logs
 					stdErrStream, stdErrErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 				}
 
 			case stdOutMsg, stdOutOk := <-stdOutStream:
 				if stdOutOk {
-					messages, err := processMessage(stdOutMsg, ft)
+					messages, multilineOutBuf, err = processMessage(stdOutMsg, ft, multilineOutBuf)
 					if err != nil {
 						ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 					} else {
@@ -72,6 +82,8 @@ func (ft *FollowedTask) Start() {
 						}
 					}
 				} else {
+					// TODO before re-initializing flush multiline buf
+					// TODO keep offset to minimize writing duplicate logs
 					stdOutStream, stdOutErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 				}
 
@@ -81,9 +93,10 @@ func (ft *FollowedTask) Start() {
 			case outErr := <-stdOutErr:
 				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
 			default:
-				message := fmt.Sprintf("Processing Allocation:%s ID:%s Task:%s", ft.Alloc.Name, ft.Alloc.ID, ft.Task.Name)
-				message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-				_, _ = fmt.Println(message)
+				//message := fmt.Sprintf("Processing Allocation:%s ID:%s Task:%s", ft.Alloc.Name, ft.Alloc.ID, ft.Task.Name)
+				//message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
+				//_, _ = fmt.Println(message)
+				// TODO maybe able to get rid of this default clause entirely
 				time.Sleep(10 * time.Second)
 			}
 		}
@@ -99,12 +112,32 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 	return result
 }
 
-func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, error) {
+// json logs must be on a single line to be properly parsed aka newlines escaped if included
+// needs to return multiline buf to be passed to next run
+// pseudo code for non-single-line json logs
+// if has a timestamp
+//   if multiline buf is empty
+//     add to multiline buf + continue
+//   else
+//     flush multiline buf as json
+//     add to multiline buf + continue
+// else
+//   if multiline buf is empty
+//     add frag header + line to multiline buf + continue
+//   else
+//     add line to multiline buf + continue
+func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask, multilineBuf []string) ([]string, []string, error) {
+	initialTimestamp := fuzzytime.DateTime{}
+	lastTimestamp := initialTimestamp.ISOFormat()
 	messages := strings.Split(string(frame.Data[:]), "\n")
-	jsons := make([]string, 0)
+	// TODO set capacity as top level constant, maybe 100? depends heavily on log volume
+	jsons := make([]string, 0, 10)
 	for _, message := range messages {
 		if message != "" && message != "\n" {
 			if isJSON(message) {
+				fmt.Printf("found single-line json log: %s", message)
+				// no multi-line buffering for valid single-line json
+				// TODO add wrap json function + struct for consistent fields, etc
 				json, err := addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
 				if err != nil {
 					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
@@ -112,17 +145,49 @@ func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask) ([]string, er
 					jsons = append(jsons, json)
 				}
 			} else {
-				s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
-				if err != nil {
-					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+				timestamp := findTimestamp(message)
+				if timestamp != "" {
+					fmt.Printf("Found message with timestamp: %s, msg: %s\n", timestamp, message)
+					lastTimestamp = timestamp
+					if len(multilineBuf) == 0 {
+						fmt.Printf("beginning multiline, msg: %s\n", message)
+						multilineBuf = append(multilineBuf, message)
+					} else {
+						// flush multiline buf + start over
+						// TODO add timestamp to json log
+						fmt.Printf("flushing multiline:\n%s\n, new multiline: %s\n", multilineBuf, message)
+						s, err := createJsonLog(ft.Alloc.ID, multilineBuf, ft.ServiceTags)
+						if err != nil {
+							// dropping log data here, add DLQ?
+							ft.ErrorChan <- fmt.Sprintf("Error building json log message: %v", err)
+						} else {
+							jsons = append(jsons, s)
+						}
+						multilineBuf = make([]string, 0, 10)
+						multilineBuf = append(multilineBuf, message)
+					}
 				} else {
-					jsons = append(jsons, s)
+					if len(multilineBuf) == 0 {
+						// log fragment case, something wrong with parsing?
+						fmt.Printf("log fragment case, msg: %s\n", message)
+						header := createFragmentHeader(lastTimestamp)
+						multilineBuf = append(multilineBuf, header)
+						multilineBuf = append(multilineBuf, message)
+					} else {
+						fmt.Printf("appending to existing multiline, msg: %s\n", message)
+						multilineBuf = append(multilineBuf, message)
+					}
 				}
+				//s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
+				//if err != nil {
+				//	ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
+				//} else {
+				//	jsons = append(jsons, s)
+				//}
 			}
 		}
 	}
-
-	return jsons, nil
+	return jsons, multilineBuf, nil
 }
 
 func isJSON(s string) bool {
@@ -152,6 +217,23 @@ func addTagsJSON(allocid string, message string, serviceTags []string) (string, 
 	return string(result[:]), nil
 }
 
+func createFragmentHeader(timestamp string) string {
+	return fmt.Sprintf("%s Log Fragment Header")
+}
+
+func createJsonLog(allocid string, messages, serviceTags []string) (string, error) {
+	js := make(map[string]interface{})
+	js["service_name"] = strings.Join(serviceTags[:], ",")
+	js["allocid"] = allocid
+	js["message"] = strings.Join(messages, "\n")
+
+	result, err := json.Marshal(js)
+	if err != nil {
+		return "", err
+	}
+	return string(result[:]), nil
+}
+
 func addTagsString(allocid string, message string, serviceTags []string) (string, error) {
 	js := make(map[string]interface{})
 	js["message"] = message
@@ -165,4 +247,22 @@ func addTagsString(allocid string, message string, serviceTags []string) (string
 	}
 
 	return string(result[:]), nil
+}
+
+func findTimestamp(line string) string {
+	var maxStartPos = 4
+	t, spans, err := fuzzytime.Extract(line)
+	if err != nil {
+		return ""
+	}
+	// Add guard to ensure date + time are within X distance
+	// e.g. if spans == 2 distance between span[0].end and span[1]
+	// begin cannot be more than X
+	if len(spans) > 0 {
+		// Line does not start with timestamp, doesn't count
+		if spans[0].Begin > maxStartPos {
+			return ""
+		}
+	}
+	return t.ISOFormat()
 }
