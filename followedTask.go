@@ -10,21 +10,57 @@ import (
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
+// INITIAL_OUTPUT_CAP is the slice capacity of the output logs before sent.
+var INITIAL_OUTPUT_CAP = 10
+
+// JSON_DATETIME_FIELDS lists fields searched in a JSON log for a timestamp.
+var JSON_DATETIME_FIELDS = []string{"datetime", "timestamp", "time", "date"}
+
+// MAX_TIMESTAMP_START_POS determines if a log timestamp signals a new multi-line log.
+var MAX_TIMESTAMP_START_POS = 4
+
+// MULTILINE_BUF_CAP is the slice capacity of new buffers to aggregate multi-line logs.
+var MULTILINE_BUF_CAP = 10
+
+// NomadLog annotates task log data with metadata from Nomad about the task
+// and allocation.  A timestamp is parsed out of the message body and string log
+// ouput is preserved under the 'message' field and JSON log output is nested
+// under the 'data' field.
+type NomadLog struct {
+	AllocId string
+	JobName string
+	NodeName string
+	ServiceName string
+	ServiceTags []string
+	ServiceTagMap map[string]string
+	TaskName string
+	// these all set at log time
+	Timestamp string
+	Message string
+	Data map[string]interface{}
+}
+
 //FollowedTask a container for a followed task log process
 type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
 	Client      *nomadApi.Client
 	ErrorChan   chan string
+	LogTemplate NomadLog
 	OutputChan  chan string
 	Quit        chan struct{}
-	ServiceTags []string
 	Task        *nomadApi.Task
 }
 
-//NewFollowedTask creats a new followed task
+//NewFollowedTask creates a new followed task
 func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
-	serviceTags := collectServiceTags(task.Services)
-	return &FollowedTask{Alloc: alloc, Task: task, Quit: quit, ServiceTags: serviceTags, OutputChan: output}
+	logTemplate := createLogTemplate(alloc, task)
+	return &FollowedTask{
+		Alloc: alloc,
+		Task: task,
+		Quit: quit,
+		OutputChan: output,
+		LogTemplate: logTemplate,
+	}
 }
 
 //Start starts following a task for an allocation
@@ -42,12 +78,12 @@ func (ft *FollowedTask) Start() {
 	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
 	go func() {
-		var err error
 		var messages []string
 		// buffers to hold partial entries while waiting for more data
-		// TODO set capacity as top level constant, maybe 100? depends heavily on log volume
-		var multilineOutBuf = make([]string, 0, 10)
-		var multilineErrBuf = make([]string, 0, 10)
+		var multilineOutBuf = make([]string, 0, MULTILINE_BUF_CAP)
+		var multilineErrBuf = make([]string, 0, MULTILINE_BUF_CAP)
+		var lastOutTime string
+		var lastErrTime string
 
 		for {
 			select {
@@ -57,13 +93,9 @@ func (ft *FollowedTask) Start() {
 				}
 			case stdErrMsg, stdErrOk := <-stdErrStream:
 				if stdErrOk {
-					messages, multilineErrBuf, err = processMessage(stdErrMsg, ft, multilineErrBuf)
-					if err != nil {
-						ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-					} else {
-						for _, message := range messages {
-							ft.OutputChan <- message
-						}
+					messages, multilineErrBuf, lastErrTime = ft.processMessage(stdErrMsg, multilineErrBuf, lastErrTime)
+					for _, message := range messages {
+						ft.OutputChan <- message
 					}
 				} else {
 					// TODO before re-initializing flush multiline buf
@@ -73,13 +105,9 @@ func (ft *FollowedTask) Start() {
 
 			case stdOutMsg, stdOutOk := <-stdOutStream:
 				if stdOutOk {
-					messages, multilineOutBuf, err = processMessage(stdOutMsg, ft, multilineOutBuf)
-					if err != nil {
-						ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-					} else {
-						for _, message := range messages {
-							ft.OutputChan <- message
-						}
+					messages, multilineOutBuf, lastOutTime = ft.processMessage(stdOutMsg, multilineOutBuf, lastOutTime)
+					for _, message := range messages {
+						ft.OutputChan <- message
 					}
 				} else {
 					// TODO before re-initializing flush multiline buf
@@ -93,9 +121,6 @@ func (ft *FollowedTask) Start() {
 			case outErr := <-stdOutErr:
 				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
 			default:
-				//message := fmt.Sprintf("Processing Allocation:%s ID:%s Task:%s", ft.Alloc.Name, ft.Alloc.ID, ft.Task.Name)
-				//message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-				//_, _ = fmt.Println(message)
 				// TODO maybe able to get rid of this default clause entirely
 				time.Sleep(10 * time.Second)
 			}
@@ -112,9 +137,43 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 	return result
 }
 
-// json logs must be on a single line to be properly parsed aka newlines escaped if included
-// needs to return multiline buf to be passed to next run
-// pseudo code for non-single-line json logs
+func createLogTemplate(alloc *nomadApi.Allocation, task *nomadApi.Task) NomadLog {
+	tmpl := NomadLog{}
+	service := nomadApi.Service{}
+
+	tmpl.AllocId = alloc.ID
+	tmpl.JobName = *alloc.Job.Name
+	tmpl.NodeName = alloc.NodeName
+	tmpl.ServiceTags = make([]string, 0)
+	tmpl.ServiceTagMap = make(map[string]string)
+	if len(task.Services) > 0 {
+		// shouldn't have more than one service per task
+		service = *task.Services[0]
+		tmpl.ServiceName = service.Name
+		for _, t := range service.Tags {
+			parts := strings.SplitN(t, "=", 2)
+			if len(parts) == 2 {
+				key := parts[0]
+				val := parts[1]
+				tmpl.ServiceTagMap[key] = val
+			}
+			tmpl.ServiceTags = append(tmpl.ServiceTags, t)
+		}
+	}
+	tmpl.TaskName = task.Name
+	tmpl.Data = make(map[string]interface{})
+	return tmpl
+}
+
+// processMessage takes a single log line and determines if it is JSON, or a single or multi-line log.
+//
+// Requirements of operation:
+// - JSON logs must be on a single line to be properly parsed aka newlines escaped if included
+// - String logs must contain a datetime as close to the beginning of the line as possible
+// - Multi-line string logs should not contain datetimes near the beginning of the string
+//   to be grouped properly
+//
+// Pseudo code for multi-line string logs:
 // if has a timestamp
 //   if multiline buf is empty
 //     add to multiline buf + continue
@@ -126,68 +185,62 @@ func collectServiceTags(services []*nomadApi.Service) []string {
 //     add frag header + line to multiline buf + continue
 //   else
 //     add line to multiline buf + continue
-func processMessage(frame *nomadApi.StreamFrame, ft *FollowedTask, multilineBuf []string) ([]string, []string, error) {
-	initialTimestamp := fuzzytime.DateTime{}
-	lastTimestamp := initialTimestamp.ISOFormat()
+// Note: last timestamp and multiline buffer must be passed to and received from the calling
+//       function to properly mark timestamps and group logs between calls.
+func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, multilineBuf []string, lastTime string) ([]string, []string, string) {
+	var lastTimestamp = lastTime
 	messages := strings.Split(string(frame.Data[:]), "\n")
-	// TODO set capacity as top level constant, maybe 100? depends heavily on log volume
-	jsons := make([]string, 0, 10)
+	jsons := make([]string, 0, INITIAL_OUTPUT_CAP)
 	for _, message := range messages {
 		if message != "" && message != "\n" {
 			if isJSON(message) {
-				fmt.Printf("found single-line json log: %s", message)
+				//fmt.Printf("found single-line json log: %s", message)
 				// no multi-line buffering for valid single-line json
-				// TODO add wrap json function + struct for consistent fields, etc
-				json, err := addTagsJSON(ft.Alloc.ID, message, ft.ServiceTags)
+				s, err := wrapJsonLog(ft.LogTemplate, message)
 				if err != nil {
+					// TODO dropping log data here, add DLQ?
 					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
 				} else {
-					jsons = append(jsons, json)
+					jsons = append(jsons, s)
 				}
 			} else {
 				timestamp := findTimestamp(message)
 				if timestamp != "" {
-					fmt.Printf("Found message with timestamp: %s, msg: %s\n", timestamp, message)
-					lastTimestamp = timestamp
+					//fmt.Printf("Found message with timestamp: %s, msg: %s\n", timestamp, message)
 					if len(multilineBuf) == 0 {
-						fmt.Printf("beginning multiline, msg: %s\n", message)
+						//fmt.Printf("beginning multiline, msg: %s\n", message)
 						multilineBuf = append(multilineBuf, message)
 					} else {
 						// flush multiline buf + start over
-						// TODO add timestamp to json log
-						fmt.Printf("flushing multiline:\n%s\n, new multiline: %s\n", multilineBuf, message)
-						s, err := createJsonLog(ft.Alloc.ID, multilineBuf, ft.ServiceTags)
+						//fmt.Printf("flushing multiline:\n%s\n, new multiline: %s\n", multilineBuf, message)
+						s, err := createJsonLog(ft.LogTemplate, multilineBuf, lastTimestamp)
 						if err != nil {
-							// dropping log data here, add DLQ?
+							// TODO dropping log data here, add DLQ?
 							ft.ErrorChan <- fmt.Sprintf("Error building json log message: %v", err)
 						} else {
 							jsons = append(jsons, s)
 						}
-						multilineBuf = make([]string, 0, 10)
+						multilineBuf = make([]string, 0, MULTILINE_BUF_CAP)
 						multilineBuf = append(multilineBuf, message)
 					}
+					// don't update until prior multi-line flush uses it
+					lastTimestamp = timestamp
 				} else {
 					if len(multilineBuf) == 0 {
 						// log fragment case, something wrong with parsing?
-						fmt.Printf("log fragment case, msg: %s\n", message)
+						//fmt.Printf("log fragment case, msg: %s\n", message)
 						header := createFragmentHeader(lastTimestamp)
 						multilineBuf = append(multilineBuf, header)
 						multilineBuf = append(multilineBuf, message)
 					} else {
-						fmt.Printf("appending to existing multiline, msg: %s\n", message)
+						//fmt.Printf("appending to existing multiline, msg: %s\n", message)
 						multilineBuf = append(multilineBuf, message)
 					}
 				}
-				//s, err := addTagsString(ft.Alloc.ID, message, ft.ServiceTags)
-				//if err != nil {
-				//	ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-				//} else {
-				//	jsons = append(jsons, s)
-				//}
 			}
 		}
 	}
-	return jsons, multilineBuf, nil
+	return jsons, multilineBuf, lastTimestamp
 }
 
 func isJSON(s string) bool {
@@ -202,55 +255,61 @@ func getJSONMessage(s string) map[string]interface{} {
 	return js
 }
 
-func addTagsJSON(allocid string, message string, serviceTags []string) (string, error) {
-	js := getJSONMessage(message)
-
-	js["service_name"] = strings.Join(serviceTags[:], ",")
-	js["allocid"] = allocid
-
-	result, err := json.Marshal(js)
-
-	if err != nil {
-		return "", err
-	}
-
-	return string(result[:]), nil
-}
-
 func createFragmentHeader(timestamp string) string {
 	return fmt.Sprintf("%s Log Fragment Header")
 }
 
-func createJsonLog(allocid string, messages, serviceTags []string) (string, error) {
-	js := make(map[string]interface{})
-	js["service_name"] = strings.Join(serviceTags[:], ",")
-	js["allocid"] = allocid
-	js["message"] = strings.Join(messages, "\n")
+func wrapJsonLog(logTmpl NomadLog, line string) (string, error) {
+	data := getJSONMessage(line)
+	timestamp := findJsonTimestamp(data)
+	logTmpl.Data = data
+	logTmpl.Timestamp = timestamp
 
-	result, err := json.Marshal(js)
+	result, err := json.Marshal(logTmpl)
 	if err != nil {
 		return "", err
 	}
 	return string(result[:]), nil
 }
 
-func addTagsString(allocid string, message string, serviceTags []string) (string, error) {
-	js := make(map[string]interface{})
-	js["message"] = message
-	js["service_name"] = strings.Join(serviceTags[:], ",")
-	js["allocid"] = allocid
+func createJsonLog(logTmpl NomadLog, lines []string, timestamp string) (string, error) {
+	logTmpl.Message = strings.Join(lines, "\n")
+	logTmpl.Timestamp = timestamp
 
-	result, err := json.Marshal(js)
-
+	result, err := json.Marshal(logTmpl)
 	if err != nil {
 		return "", err
 	}
-
 	return string(result[:]), nil
 }
 
+// findJsonTimestamp looks at top level keys in a json log to find a timestamp.
+//
+// Returns the first parse-able timestamp in the list of JSON_DATETIME_FIELDS
+// searched.
+func findJsonTimestamp(data map[string]interface{}) string {
+	for _, field := range JSON_DATETIME_FIELDS {
+		value, ok := data[field]
+		if ok {
+			s, ok := value.(string)
+			if !ok {
+				continue
+			}
+			t, _, err := fuzzytime.Extract(s)
+			if err != nil {
+				return ""
+			}
+			if t.ISOFormat() != "" {
+				return t.ISOFormat()
+			}
+		}
+	}
+	return ""
+}
+
+// findTimestamp determines if a string starts with a timestamp, and returns it.
 func findTimestamp(line string) string {
-	var maxStartPos = 4
+	var maxStartPos = MAX_TIMESTAMP_START_POS
 	t, spans, err := fuzzytime.Extract(line)
 	if err != nil {
 		return ""
