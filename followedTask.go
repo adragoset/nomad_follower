@@ -27,17 +27,17 @@ var MULTILINE_BUF_CAP = 10
 // ouput is preserved under the 'message' field and JSON log output is nested
 // under the 'data' field.
 type NomadLog struct {
-	AllocId string
-	JobName string
-	NodeName string
-	ServiceName string
-	ServiceTags []string
-	ServiceTagMap map[string]string
-	TaskName string
+	AllocId string `json:"alloc_id"`
+	JobName string `json:"job_name"`
+	NodeName string `json:"node_name"`
+	ServiceName string `json:"service_name"`
+	ServiceTags []string `json:"service_tags"`
+	ServiceTagMap map[string]string `json:"service_tag_map"`
+	TaskName string `json:"task_name"`
 	// these all set at log time
-	Timestamp string
-	Message string
-	Data map[string]interface{}
+	Timestamp string `json:"timestamp"`
+	Message string `json:"message"`
+	Data map[string]interface{} `json:"data"`
 }
 
 //FollowedTask a container for a followed task log process
@@ -45,10 +45,10 @@ type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
 	Client      *nomadApi.Client
 	ErrorChan   chan string
-	LogTemplate NomadLog
 	OutputChan  chan string
 	Quit        chan struct{}
 	Task        *nomadApi.Task
+	LogTemplate NomadLog
 }
 
 //NewFollowedTask creates a new followed task
@@ -56,9 +56,11 @@ func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorC
 	logTemplate := createLogTemplate(alloc, task)
 	return &FollowedTask{
 		Alloc: alloc,
-		Task: task,
-		Quit: quit,
+		Client: client,
+		ErrorChan: errorChan,
 		OutputChan: output,
+		Quit: quit,
+		Task: task,
 		LogTemplate: logTemplate,
 	}
 }
