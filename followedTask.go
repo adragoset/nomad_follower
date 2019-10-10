@@ -150,19 +150,40 @@ func createLogTemplate(alloc *nomadApi.Allocation, task *nomadApi.Task) NomadLog
 		// shouldn't have more than one service per task
 		service = *task.Services[0]
 		tmpl.ServiceName = service.Name
-		for _, t := range service.Tags {
-			parts := strings.SplitN(t, "=", 2)
-			if len(parts) == 2 {
-				key := parts[0]
-				val := parts[1]
-				tmpl.ServiceTagMap[key] = val
+		tmpl.ServiceTags = service.Tags
+		tmpl.ServiceTagMap = getServiceTagMap(service)
+	} else {
+		for _, tg := range alloc.Job.TaskGroups {
+			if len(tg.Services) == 0 {
+				continue
 			}
-			tmpl.ServiceTags = append(tmpl.ServiceTags, t)
+			for _, t := range tg.Tasks {
+				if t.Name == task.Name {
+					service = *tg.Services[0]
+					tmpl.ServiceName = service.Name
+					tmpl.ServiceTags = service.Tags
+					tmpl.ServiceTagMap = getServiceTagMap(service)
+				}
+			}
 		}
 	}
 	tmpl.TaskName = task.Name
 	tmpl.Data = make(map[string]interface{})
 	return tmpl
+}
+
+func getServiceTagMap(service nomadApi.Service) (map[string]string) {
+	var serviceTagMap = make(map[string]string)
+
+	for _, t := range service.Tags {
+		parts := strings.SplitN(t, "=", 2)
+		if len(parts) == 2 {
+			key := parts[0]
+			val := parts[1]
+			serviceTagMap[key] = val
+		}
+	}
+	return serviceTagMap
 }
 
 // processMessage takes a single log line and determines if it is JSON, or a single or multi-line log.
