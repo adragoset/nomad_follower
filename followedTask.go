@@ -43,7 +43,7 @@ type NomadLog struct {
 //FollowedTask a container for a followed task log process
 type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
-	Client      *nomadApi.Client
+	Nomad       NomadConfig
 	ErrorChan   chan string
 	OutputChan  chan string
 	Quit        chan struct{}
@@ -52,11 +52,11 @@ type FollowedTask struct {
 }
 
 //NewFollowedTask creates a new followed task
-func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
+func NewFollowedTask(alloc *nomadApi.Allocation, nomad NomadConfig, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
 	logTemplate := createLogTemplate(alloc, task)
 	return &FollowedTask{
 		Alloc: alloc,
-		Client: client,
+		Nomad: nomad,
 		ErrorChan: errorChan,
 		OutputChan: output,
 		Quit: quit,
@@ -67,15 +67,17 @@ func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorC
 
 //Start starts following a task for an allocation
 func (ft *FollowedTask) Start() {
-	config := nomadApi.DefaultConfig()
-	config.WaitTime = 5 * time.Minute
-	client, err := nomadApi.NewClient(config)
-	if err != nil {
+	// TODO re-add as separate client once testing finished
+	//config := nomadApi.DefaultConfig()
+	//config.WaitTime = 5 * time.Minute
+	//client, err := nomadApi.NewClient(config)
+	//if err != nil {
 		// TODO review -- this should be json in json given output wrapping + needs a date
-		ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
-	}
+		//ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
+	//}
 
-	fs := client.AllocFS()
+	//fs := client.AllocFS()
+	fs := ft.Nomad.Client().AllocFS()
 	stdErrStream, stdErrErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
@@ -119,24 +121,23 @@ func (ft *FollowedTask) Start() {
 
 			case errErr := <-stdErrErr:
 				ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
+				// Handle task starting while client has invalid token
+				ft.Nomad.RenewToken()
+				// TODO keep offset to minimize writing duplicate logs
+				stdErrStream, stdErrErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 
 			case outErr := <-stdOutErr:
 				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
+				// Handle task starting while client has invalid token
+				ft.Nomad.RenewToken()
+				// TODO keep offset to minimize writing duplicate logs
+				stdOutStream, stdOutErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
 			default:
 				// TODO maybe able to get rid of this default clause entirely
 				time.Sleep(10 * time.Second)
 			}
 		}
 	}()
-}
-
-func collectServiceTags(services []*nomadApi.Service) []string {
-	result := make([]string, 0)
-
-	for _, service := range services {
-		result = append(result, service.Name)
-	}
-	return result
 }
 
 func createLogTemplate(alloc *nomadApi.Allocation, task *nomadApi.Task) NomadLog {

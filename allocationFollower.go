@@ -10,8 +10,7 @@ import (
 //AllocationFollower a container for the list of followed allocations
 type AllocationFollower struct {
 	Allocations map[string]*FollowedAllocation
-	Config      *nomadApi.Config
-	Client      *nomadApi.Client
+	Nomad       NomadConfig
 	ErrorChan   chan string
 	NodeID      string
 	OutChan     chan string
@@ -20,25 +19,24 @@ type AllocationFollower struct {
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(outChan chan string, errorChan chan string) (a *AllocationFollower, e error) {
+func NewAllocationFollower(nomad NomadConfig, outChan chan string, errorChan chan string) (a *AllocationFollower, e error) {
+	return &AllocationFollower{
+		Allocations: make(map[string]*FollowedAllocation),
+		Nomad: nomad,
+		ErrorChan: errorChan,
+		NodeID: "",
+		OutChan: outChan,
+		Quit: make(chan bool),
+	}, nil
+}
 
-	config := nomadApi.DefaultConfig()
-	config.WaitTime = 5 * time.Minute
-
-	client, err := nomadApi.NewClient(config)
-
+func (a *AllocationFollower) SetNodeID() error {
+	self, err := a.Nomad.Client().Agent().Self()
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	self, err := client.Agent().Self()
-
-	if err != nil {
-		return nil, err
-	}
-
-	id := self.Stats["client"]["node_id"]
-	return &AllocationFollower{Allocations: make(map[string]*FollowedAllocation), Config: config, Client: client, ErrorChan: errorChan, NodeID: id, OutChan: outChan, Quit: make(chan bool)}, nil
+	a.NodeID = self.Stats["client"]["node_id"]
+	return nil
 }
 
 //Start registers and de registers allocation followers
@@ -46,17 +44,28 @@ func (a *AllocationFollower) Start(duration time.Duration) {
 	a.Ticker = time.NewTicker(duration)
 
 	go func() {
+		defer a.Ticker.Stop()
+
+		// run here while errChan is being read to not deadlock
+		a.Nomad.RenewToken()
+		err := a.SetNodeID()
+		if err != nil {
+			// cannot lookup allocations w/o node-id, hard fail
+			a.ErrorChan <- fmt.Sprintf("Could not fetch NodeID: %s", err)
+			return
+		}
 		for {
 			select {
 			case <-a.Ticker.C:
 				err := a.collectAllocations()
 				if err != nil {
 					a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
+					// TODO determine if any good way to differentiate 403 from other?
+					a.Nomad.RenewToken()
 				}
 			case <-a.Quit:
 				message := fmt.Sprintf("{ \"message\":\"%s\"}", "Stopping Allocation Follower")
 				_, _ = fmt.Println(message)
-				a.Ticker.Stop()
 				return
 			}
 		}
@@ -77,7 +86,8 @@ func (a *AllocationFollower) collectAllocations() error {
 	message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
 	_, _ = fmt.Println(message)
 
-	allocs, _, err := a.Client.Nodes().Allocations(a.NodeID, &nomadApi.QueryOptions{})
+	nodeReader := a.Nomad.Client().Nodes()
+	allocs, _, err := nodeReader.Allocations(a.NodeID, &nomadApi.QueryOptions{})
 
 	if err != nil {
 		return err
@@ -86,7 +96,7 @@ func (a *AllocationFollower) collectAllocations() error {
 	for _, alloc := range allocs {
 		record := a.Allocations[alloc.ID]
 		if record == nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
-			falloc := NewFollowedAllocation(alloc, a.Client, a.ErrorChan, a.OutChan)
+			falloc := NewFollowedAllocation(alloc, a.Nomad, a.ErrorChan, a.OutChan)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
 		}

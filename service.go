@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	nomadApi "github.com/hashicorp/nomad/api"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -24,9 +25,26 @@ func main() {
 		MaxAge:     1,
 	}, "", 0)
 
-	af, err := NewAllocationFollower(outChan, errChan)
+	config := nomadApi.DefaultConfig()
+	config.WaitTime = 5 * time.Minute
+
+	var nomadConfig NomadConfig
+	nomadTokenBackend := os.Getenv("NOMAD_TOKEN_BACKEND")
+	if nomadTokenBackend == "" {
+		nomadConfig = NewNomadEnvAuth(errChan, config)
+	} else {
+		nomadConfig = NewNomadRenewableAuth(
+			nomadTokenBackend,
+			errChan,
+			config,
+			nil,
+		)
+	}
+
+	af, err := NewAllocationFollower(nomadConfig, outChan, errChan)
 	if err != nil {
 		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
+		return
 	}
 
 	af.Start(time.Second * 30)
@@ -58,5 +76,5 @@ func createLogFile() {
 		defer file.Close()
 	}
 
-	fmt.Println("{ \"message\":\"==> done creating log file\"}", path)
+	fmt.Printf("{ \"message\":\"created log file: %s\"}\n", path)
 }
