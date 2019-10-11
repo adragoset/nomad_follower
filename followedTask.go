@@ -70,10 +70,29 @@ type StreamState struct {
 	LastTimestamp string
 	ConsecErrors uint
 	FileOffset int64
+	// internal use only
+	initialBufferCap int
+	quit chan struct{}
+	allocFS *nomadApi.AllocFS
 }
 
-func NewStreamState(initialBufferCap int) StreamState {
+func (s *StreamState) BufAdd(msg string) {
+	s.MultiLineBuf = append(s.MultiLineBuf, msg)
+}
+
+func (s *StreamState) BufReset() {
+	s.MultiLineBuf = make([]string, 0, s.initialBufferCap)
+}
+
+func (s *StreamState) Start(alloc *nomadApi.Allocation, task, logType string) (<-chan *nomadApi.StreamFrame, <-chan error) {
+	return s.allocFS.Logs(alloc, true, task, logType, "start", s.FileOffset, s.quit, &nomadApi.QueryOptions{})
+}
+
+func NewStreamState(allocFS *nomadApi.AllocFS, quit chan struct{}, initialBufferCap int) StreamState {
 	s := StreamState{}
+	s.initialBufferCap = initialBufferCap
+	s.quit = quit
+	s.allocFS = allocFS
 	s.MultiLineBuf = make([]string, 0, initialBufferCap)
 	return s
 }
@@ -88,17 +107,16 @@ func (ft *FollowedTask) Start() {
 		// TODO review -- this should be json in json given output wrapping + needs a date
 		//ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
 	//}
-
 	//fs := client.AllocFS()
+
 	fs := ft.Nomad.Client().AllocFS()
-	stdErrStream, stdErrErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
-	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+	var stdOutState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
+	var stdErrState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
+	stdOutStream, stdOutErr := stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
+	stdErrStream, stdErrErr := stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
 
 	go func() {
 		var messages []string
-		var stdOutState = NewStreamState(MULTILINE_BUF_CAP)
-		var stdErrState = NewStreamState(MULTILINE_BUF_CAP)
-
 		for {
 			// TODO need some max possible sleep duration
 			// Keeps dead allocs from crash looping (until 403/404 error differentiated)
@@ -123,16 +141,7 @@ func (ft *FollowedTask) Start() {
 					stdErrState.FileOffset = stdErrMsg.Offset
 					stdErrState.ConsecErrors = 0
 				} else {
-					stdErrStream, stdErrErr = fs.Logs(
-						ft.Alloc,
-						true,
-						ft.Task.Name,
-						"stderr",
-						"start",
-						stdErrState.FileOffset,
-						ft.Quit,
-						&nomadApi.QueryOptions{},
-					)
+					stdErrStream, stdErrErr = stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
 					stdErrState.ConsecErrors += 1
 				}
 
@@ -145,16 +154,7 @@ func (ft *FollowedTask) Start() {
 					stdOutState.FileOffset = stdOutMsg.Offset
 					stdOutState.ConsecErrors = 0
 				} else {
-					stdOutStream, stdOutErr = fs.Logs(
-						ft.Alloc,
-						true,
-						ft.Task.Name,
-						"stdout",
-						"start",
-						stdOutState.FileOffset,
-						ft.Quit,
-						&nomadApi.QueryOptions{},
-					)
+					stdOutStream, stdOutErr = stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
 					stdOutState.ConsecErrors += 1
 				}
 
@@ -163,16 +163,7 @@ func (ft *FollowedTask) Start() {
 				// TODO handle 403 case separately from 404 case
 				// Handle task starting while client has invalid token
 				ft.Nomad.RenewToken()
-				stdErrStream, stdErrErr = fs.Logs(
-					ft.Alloc,
-					true,
-					ft.Task.Name,
-					"stderr",
-					"start",
-					stdErrState.FileOffset,
-					ft.Quit,
-					&nomadApi.QueryOptions{},
-				)
+				stdErrStream, stdErrErr = stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
 				stdErrState.ConsecErrors += 1
 
 			case outErr := <-stdOutErr:
@@ -180,16 +171,7 @@ func (ft *FollowedTask) Start() {
 				// TODO handle 403 case separately from 404 case
 				// Handle task starting while client has invalid token
 				ft.Nomad.RenewToken()
-				stdOutStream, stdOutErr = fs.Logs(
-					ft.Alloc,
-					true,
-					ft.Task.Name,
-					"stdout",
-					"start",
-					stdOutState.FileOffset,
-					ft.Quit,
-					&nomadApi.QueryOptions{},
-				)
+				stdOutStream, stdOutErr = stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
 				stdOutState.ConsecErrors += 1
 			}
 		}
@@ -288,7 +270,7 @@ func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState 
 					//fmt.Printf("Found message with timestamp: %s, msg: %s\n", timestamp, message)
 					if len(streamState.MultiLineBuf) == 0 {
 						//fmt.Printf("beginning multiline, msg: %s\n", message)
-						streamState.MultiLineBuf = append(streamState.MultiLineBuf, message)
+						streamState.BufAdd(message)
 					} else {
 						// flush multiline buf + start over
 						//fmt.Printf("flushing multiline:\n%s\n, new multiline: %s\n", multilineBuf, message)
@@ -299,8 +281,8 @@ func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState 
 						} else {
 							jsons = append(jsons, s)
 						}
-						streamState.MultiLineBuf = make([]string, 0, MULTILINE_BUF_CAP)
-						streamState.MultiLineBuf = append(streamState.MultiLineBuf, message)
+						streamState.BufReset()
+						streamState.BufAdd(message)
 					}
 					// don't update until prior multi-line flush uses it
 					streamState.LastTimestamp = timestamp
@@ -309,11 +291,11 @@ func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState 
 						// log fragment case, something wrong with parsing?
 						//fmt.Printf("log fragment case, msg: %s\n", message)
 						header := createFragmentHeader(streamState.LastTimestamp)
-						streamState.MultiLineBuf = append(streamState.MultiLineBuf, header)
-						streamState.MultiLineBuf = append(streamState.MultiLineBuf, message)
+						streamState.BufAdd(header)
+						streamState.BufAdd(message)
 					} else {
 						//fmt.Printf("appending to existing multiline, msg: %s\n", message)
-						streamState.MultiLineBuf = append(streamState.MultiLineBuf, message)
+						streamState.BufAdd(message)
 					}
 				}
 			}
