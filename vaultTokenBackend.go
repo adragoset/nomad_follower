@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
 	vaultApi "github.com/hashicorp/vault/api"
@@ -28,8 +29,7 @@ func (n *NomadEnvAuth) Client() *nomadApi.Client {
 
 // RenewToken is a no-operation call to meet the NomadConfig interface.
 func (n *NomadEnvAuth) RenewToken() {
-	// nothing to do NOMAD_TOKEN is used
-	// or cluster does not use ACLs
+	// nothing to do $NOMAD_TOKEN is used or cluster does not use ACLs
 }
 
 // NewNomadEnvAuth returns a new standard-auth config relying on $NOMAD_TOKEN.
@@ -61,6 +61,8 @@ type NomadRenewableAuth struct {
 	vaultConfig *vaultApi.Config
 
 	nomadTokenBackend string
+	circuitBreak time.Duration
+	lastRenewTime time.Time
 }
 
 // Client returns a pointer to the internal Nomad client struct.
@@ -69,8 +71,13 @@ func (n *NomadRenewableAuth) Client() *nomadApi.Client {
 }
 
 // RenewToken uses a Vault Nomad secrets backend to create a new Nomad token.
-// TODO expect to be retried may need backoff/circuit breaking
 func (n *NomadRenewableAuth) RenewToken() {
+	// check if circuit breaker tripped on token renewal
+	t := time.Now()
+	past := t.Sub(n.lastRenewTime)
+	if past < n.circuitBreak {
+		return
+	}
 	vaultReader := n.vaultClient.Logical()
 	resp, err := vaultReader.Read(n.nomadTokenBackend)
 	if err != nil {
@@ -93,10 +100,11 @@ func (n *NomadRenewableAuth) RenewToken() {
 	// set in client
 	n.errCh <- fmt.Sprintf("Refreshed Nomad token from Vault.")
 	n.client.SetSecretID(token)
+	n.lastRenewTime = time.Now()
 }
 
 // NewNomadRenewableAuth returns a config reliant on a Vault Nomad backend to provide auth tokens.
-func NewNomadRenewableAuth(tokenBackend string, errCh chan string, nomadConfig *nomadApi.Config, vaultConfig *vaultApi.Config) *NomadRenewableAuth {
+func NewNomadRenewableAuth(tokenBackend string, errCh chan string, circuitBreak time.Duration, nomadConfig *nomadApi.Config, vaultConfig *vaultApi.Config) *NomadRenewableAuth {
 	var n = NomadRenewableAuth{}
 	var err error
 	if nomadConfig == nil {
@@ -124,5 +132,6 @@ func NewNomadRenewableAuth(tokenBackend string, errCh chan string, nomadConfig *
 	}
 	n.nomadTokenBackend = tokenBackend
 	n.errCh = errCh
+	n.circuitBreak = circuitBreak
 	return &n
 }

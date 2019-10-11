@@ -10,6 +10,8 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+var DEFAULT_CIRCUIT_BREAK = 60 * time.Second
+
 func main() {
 
 	createLogFile()
@@ -36,6 +38,7 @@ func main() {
 		nomadConfig = NewNomadRenewableAuth(
 			nomadTokenBackend,
 			errChan,
+			DEFAULT_CIRCUIT_BREAK,
 			config,
 			nil,
 		)
