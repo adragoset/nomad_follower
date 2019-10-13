@@ -43,7 +43,7 @@ type NomadLog struct {
 //FollowedTask a container for a followed task log process
 type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
-	Client      *nomadApi.Client
+	Nomad       NomadConfig
 	ErrorChan   chan string
 	OutputChan  chan string
 	Quit        chan struct{}
@@ -52,11 +52,11 @@ type FollowedTask struct {
 }
 
 //NewFollowedTask creates a new followed task
-func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
+func NewFollowedTask(alloc *nomadApi.Allocation, nomad NomadConfig, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
 	logTemplate := createLogTemplate(alloc, task)
 	return &FollowedTask{
 		Alloc: alloc,
-		Client: client,
+		Nomad: nomad,
 		ErrorChan: errorChan,
 		OutputChan: output,
 		Quit: quit,
@@ -65,78 +65,117 @@ func NewFollowedTask(alloc *nomadApi.Allocation, client *nomadApi.Client, errorC
 	}
 }
 
+type StreamState struct {
+	MultiLineBuf []string
+	LastTimestamp string
+	ConsecErrors uint
+	FileOffset int64
+	// internal use only
+	initialBufferCap int
+	quit chan struct{}
+	allocFS *nomadApi.AllocFS
+}
+
+func (s *StreamState) BufAdd(msg string) {
+	s.MultiLineBuf = append(s.MultiLineBuf, msg)
+}
+
+func (s *StreamState) BufReset() {
+	s.MultiLineBuf = make([]string, 0, s.initialBufferCap)
+}
+
+func (s *StreamState) Start(alloc *nomadApi.Allocation, task, logType string) (<-chan *nomadApi.StreamFrame, <-chan error) {
+	return s.allocFS.Logs(alloc, true, task, logType, "start", s.FileOffset, s.quit, &nomadApi.QueryOptions{})
+}
+
+func NewStreamState(allocFS *nomadApi.AllocFS, quit chan struct{}, initialBufferCap int) StreamState {
+	s := StreamState{}
+	s.initialBufferCap = initialBufferCap
+	s.quit = quit
+	s.allocFS = allocFS
+	s.MultiLineBuf = make([]string, 0, initialBufferCap)
+	return s
+}
+
 //Start starts following a task for an allocation
 func (ft *FollowedTask) Start() {
-	config := nomadApi.DefaultConfig()
-	config.WaitTime = 5 * time.Minute
-	client, err := nomadApi.NewClient(config)
-	if err != nil {
+	// TODO re-add as separate client once testing finished
+	//config := nomadApi.DefaultConfig()
+	//config.WaitTime = 5 * time.Minute
+	//client, err := nomadApi.NewClient(config)
+	//if err != nil {
 		// TODO review -- this should be json in json given output wrapping + needs a date
-		ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
-	}
+		//ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
+	//}
+	//fs := client.AllocFS()
 
-	fs := client.AllocFS()
-	stdErrStream, stdErrErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
-	stdOutStream, stdOutErr := fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+	fs := ft.Nomad.Client().AllocFS()
+	var stdOutState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
+	var stdErrState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
+	stdOutStream, stdOutErr := stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
+	stdErrStream, stdErrErr := stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
 
 	go func() {
 		var messages []string
-		// buffers to hold partial entries while waiting for more data
-		var multilineOutBuf = make([]string, 0, MULTILINE_BUF_CAP)
-		var multilineErrBuf = make([]string, 0, MULTILINE_BUF_CAP)
-		var lastOutTime string
-		var lastErrTime string
-
 		for {
+			// TODO need some max possible sleep duration
+			// Keeps dead allocs from crash looping (until 403/404 error differentiated)
+			if stdOutState.ConsecErrors > 0 || stdErrState.ConsecErrors > 0 {
+				delay := 1 << stdOutState.ConsecErrors + 1 << stdErrState.ConsecErrors
+				ft.ErrorChan <- fmt.Sprintf("Inserting delay of %ds for allocation: %s task: %s", delay, ft.Alloc.ID, ft.Task.Name)
+				time.Sleep(time.Duration(delay) * time.Second)
+			}
+
 			select {
 			case _, ok := <-ft.Quit:
+				// TODO handle quit case gracefully, flush buffer to out chan
 				if !ok {
 					return
 				}
 			case stdErrMsg, stdErrOk := <-stdErrStream:
 				if stdErrOk {
-					messages, multilineErrBuf, lastErrTime = ft.processMessage(stdErrMsg, multilineErrBuf, lastErrTime)
+					messages, stdErrState = ft.processMessage(stdErrMsg, stdErrState)
 					for _, message := range messages {
 						ft.OutputChan <- message
 					}
+					stdErrState.FileOffset = stdErrMsg.Offset
+					stdErrState.ConsecErrors = 0
 				} else {
-					// TODO before re-initializing flush multiline buf
-					// TODO keep offset to minimize writing duplicate logs
-					stdErrStream, stdErrErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stderr", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+					stdErrStream, stdErrErr = stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
+					stdErrState.ConsecErrors += 1
 				}
 
 			case stdOutMsg, stdOutOk := <-stdOutStream:
 				if stdOutOk {
-					messages, multilineOutBuf, lastOutTime = ft.processMessage(stdOutMsg, multilineOutBuf, lastOutTime)
+					messages, stdOutState = ft.processMessage(stdOutMsg, stdOutState)
 					for _, message := range messages {
 						ft.OutputChan <- message
 					}
+					stdOutState.FileOffset = stdOutMsg.Offset
+					stdOutState.ConsecErrors = 0
 				} else {
-					// TODO before re-initializing flush multiline buf
-					// TODO keep offset to minimize writing duplicate logs
-					stdOutStream, stdOutErr = fs.Logs(ft.Alloc, true, ft.Task.Name, "stdout", "start", 0, ft.Quit, &nomadApi.QueryOptions{})
+					stdOutStream, stdOutErr = stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
+					stdOutState.ConsecErrors += 1
 				}
 
 			case errErr := <-stdErrErr:
 				ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
+				// TODO handle 403 case separately from 404 case
+				// Handle task starting while client has invalid token
+				ft.Nomad.RenewToken()
+				stdErrStream, stdErrErr = stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
+				stdErrState.ConsecErrors += 1
 
 			case outErr := <-stdOutErr:
 				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
-			default:
-				// TODO maybe able to get rid of this default clause entirely
-				time.Sleep(10 * time.Second)
+				// TODO handle 403 case separately from 404 case
+				// Handle task starting while client has invalid token
+				ft.Nomad.RenewToken()
+				stdOutStream, stdOutErr = stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
+				stdOutState.ConsecErrors += 1
 			}
 		}
 	}()
-}
-
-func collectServiceTags(services []*nomadApi.Service) []string {
-	result := make([]string, 0)
-
-	for _, service := range services {
-		result = append(result, service.Name)
-	}
-	return result
 }
 
 func createLogTemplate(alloc *nomadApi.Allocation, task *nomadApi.Task) NomadLog {
@@ -210,8 +249,7 @@ func getServiceTagMap(service nomadApi.Service) (map[string]string) {
 //     add line to multiline buf + continue
 // Note: last timestamp and multiline buffer must be passed to and received from the calling
 //       function to properly mark timestamps and group logs between calls.
-func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, multilineBuf []string, lastTime string) ([]string, []string, string) {
-	var lastTimestamp = lastTime
+func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState StreamState) ([]string, StreamState) {
 	messages := strings.Split(string(frame.Data[:]), "\n")
 	jsons := make([]string, 0, INITIAL_OUTPUT_CAP)
 	for _, message := range messages {
@@ -230,40 +268,40 @@ func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, multilineBuf
 				timestamp := findTimestamp(message)
 				if timestamp != "" {
 					//fmt.Printf("Found message with timestamp: %s, msg: %s\n", timestamp, message)
-					if len(multilineBuf) == 0 {
+					if len(streamState.MultiLineBuf) == 0 {
 						//fmt.Printf("beginning multiline, msg: %s\n", message)
-						multilineBuf = append(multilineBuf, message)
+						streamState.BufAdd(message)
 					} else {
 						// flush multiline buf + start over
 						//fmt.Printf("flushing multiline:\n%s\n, new multiline: %s\n", multilineBuf, message)
-						s, err := createJsonLog(ft.LogTemplate, multilineBuf, lastTimestamp)
+						s, err := createJsonLog(ft.LogTemplate, streamState.MultiLineBuf, streamState.LastTimestamp)
 						if err != nil {
 							// TODO dropping log data here, add DLQ?
 							ft.ErrorChan <- fmt.Sprintf("Error building json log message: %v", err)
 						} else {
 							jsons = append(jsons, s)
 						}
-						multilineBuf = make([]string, 0, MULTILINE_BUF_CAP)
-						multilineBuf = append(multilineBuf, message)
+						streamState.BufReset()
+						streamState.BufAdd(message)
 					}
 					// don't update until prior multi-line flush uses it
-					lastTimestamp = timestamp
+					streamState.LastTimestamp = timestamp
 				} else {
-					if len(multilineBuf) == 0 {
+					if len(streamState.MultiLineBuf) == 0 {
 						// log fragment case, something wrong with parsing?
 						//fmt.Printf("log fragment case, msg: %s\n", message)
-						header := createFragmentHeader(lastTimestamp)
-						multilineBuf = append(multilineBuf, header)
-						multilineBuf = append(multilineBuf, message)
+						header := createFragmentHeader(streamState.LastTimestamp)
+						streamState.BufAdd(header)
+						streamState.BufAdd(message)
 					} else {
 						//fmt.Printf("appending to existing multiline, msg: %s\n", message)
-						multilineBuf = append(multilineBuf, message)
+						streamState.BufAdd(message)
 					}
 				}
 			}
 		}
 	}
-	return jsons, multilineBuf, lastTimestamp
+	return jsons, streamState
 }
 
 func isJSON(s string) bool {
