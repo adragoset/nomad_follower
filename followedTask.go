@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bcampbell/fuzzytime"
+	"github.com/dmwilcox/fuzzytime"
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
@@ -40,28 +40,36 @@ type NomadLog struct {
 	Data map[string]interface{} `json:"data"`
 }
 
+func (n *NomadLog) ToJSON() (string, error) {
+	result, err := json.Marshal(n)
+	if err != nil {
+		return "", err
+	}
+	return string(result[:]), nil
+}
+
 //FollowedTask a container for a followed task log process
 type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
 	Nomad       NomadConfig
-	ErrorChan   chan string
 	OutputChan  chan string
 	Quit        chan struct{}
 	Task        *nomadApi.Task
-	LogTemplate NomadLog
+	log         Logger
+	logTemplate NomadLog
 }
 
 //NewFollowedTask creates a new followed task
-func NewFollowedTask(alloc *nomadApi.Allocation, nomad NomadConfig, errorChan chan string, output chan string, quit chan struct{}, task *nomadApi.Task) *FollowedTask {
+func NewFollowedTask(alloc *nomadApi.Allocation, nomad NomadConfig, quit chan struct{}, task *nomadApi.Task, output chan string, logger Logger) *FollowedTask {
 	logTemplate := createLogTemplate(alloc, task)
 	return &FollowedTask{
 		Alloc: alloc,
 		Nomad: nomad,
-		ErrorChan: errorChan,
-		OutputChan: output,
 		Quit: quit,
 		Task: task,
-		LogTemplate: logTemplate,
+		OutputChan: output,
+		log: logger,
+		logTemplate: logTemplate,
 	}
 }
 
@@ -99,16 +107,15 @@ func NewStreamState(allocFS *nomadApi.AllocFS, quit chan struct{}, initialBuffer
 
 //Start starts following a task for an allocation
 func (ft *FollowedTask) Start() {
-	// TODO re-add as separate client once testing finished
 	//config := nomadApi.DefaultConfig()
 	//config.WaitTime = 5 * time.Minute
 	//client, err := nomadApi.NewClient(config)
 	//if err != nil {
-		// TODO review -- this should be json in json given output wrapping + needs a date
 		//ft.ErrorChan <- fmt.Sprintf("{ \"message\":\"%s\"}", err)
 	//}
 	//fs := client.AllocFS()
 
+	logContext := "FollowedTask.Start"
 	fs := ft.Nomad.Client().AllocFS()
 	var stdOutState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
 	var stdErrState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
@@ -121,8 +128,14 @@ func (ft *FollowedTask) Start() {
 			// TODO need some max possible sleep duration
 			// Keeps dead allocs from crash looping (until 403/404 error differentiated)
 			if stdOutState.ConsecErrors > 0 || stdErrState.ConsecErrors > 0 {
-				delay := 1 << stdOutState.ConsecErrors + 1 << stdErrState.ConsecErrors
-				ft.ErrorChan <- fmt.Sprintf("Inserting delay of %ds for allocation: %s task: %s", delay, ft.Alloc.ID, ft.Task.Name)
+				delay := 1 << (stdOutState.ConsecErrors + stdErrState.ConsecErrors)
+				ft.log.Debugf(
+					logContext,
+					"Inserting delay of %ds for alloc: %s task: %s",
+					delay,
+					ft.Alloc.ID,
+					ft.Task.Name,
+				)
 				time.Sleep(time.Duration(delay) * time.Second)
 			}
 
@@ -158,8 +171,15 @@ func (ft *FollowedTask) Start() {
 					stdOutState.ConsecErrors += 1
 				}
 
+
 			case errErr := <-stdErrErr:
-				ft.ErrorChan <- fmt.Sprintf("Error following stderr for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, errErr)
+				ft.log.Debugf(
+					logContext,
+					"Error following stderr alloc: %s task: %s error: %s",
+					ft.Alloc.ID,
+					ft.Task.Name,
+					errErr,
+				)
 				// TODO handle 403 case separately from 404 case
 				// Handle task starting while client has invalid token
 				ft.Nomad.RenewToken()
@@ -167,7 +187,13 @@ func (ft *FollowedTask) Start() {
 				stdErrState.ConsecErrors += 1
 
 			case outErr := <-stdOutErr:
-				ft.ErrorChan <- fmt.Sprintf("Error following stdout for Allocation:%s Task:%s Error:%s", ft.Alloc.ID, ft.Task.Name, outErr)
+				ft.log.Debugf(
+					logContext,
+					"Error following stdout alloc: %s task: %s error: %s",
+					ft.Alloc.ID,
+					ft.Task.Name,
+					outErr,
+				)
 				// TODO handle 403 case separately from 404 case
 				// Handle task starting while client has invalid token
 				ft.Nomad.RenewToken()
@@ -250,53 +276,91 @@ func getServiceTagMap(service nomadApi.Service) (map[string]string) {
 // Note: last timestamp and multiline buffer must be passed to and received from the calling
 //       function to properly mark timestamps and group logs between calls.
 func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState StreamState) ([]string, StreamState) {
+	logContext := "FollowedTask.processMessage"
 	messages := strings.Split(string(frame.Data[:]), "\n")
 	jsons := make([]string, 0, INITIAL_OUTPUT_CAP)
 	for _, message := range messages {
-		if message != "" && message != "\n" {
-			if isJSON(message) {
-				//fmt.Printf("found single-line json log: %s", message)
-				// no multi-line buffering for valid single-line json
-				s, err := wrapJsonLog(ft.LogTemplate, message)
-				if err != nil {
-					// TODO dropping log data here, add DLQ?
-					ft.ErrorChan <- fmt.Sprintf("Error building log message json Error:%v", err)
-				} else {
-					jsons = append(jsons, s)
-				}
+		if message == "" || message == "\n" {
+			continue
+		}
+		if isJSON(message) {
+			ft.log.Tracef(
+				logContext,
+				"Found single-line json log: %s",
+				message,
+			)
+			// no multi-line buffering for valid single-line json
+			l := wrapJsonLog(ft.logTemplate, message)
+			s, err := l.ToJSON()
+			if err != nil {
+				ft.log.DeadLetterf(
+					logContext,
+					l,
+					"Error building log message JSON Error: %v",
+					err,
+				)
 			} else {
-				timestamp := findTimestamp(message)
-				if timestamp != "" {
-					//fmt.Printf("Found message with timestamp: %s, msg: %s\n", timestamp, message)
-					if len(streamState.MultiLineBuf) == 0 {
-						//fmt.Printf("beginning multiline, msg: %s\n", message)
-						streamState.BufAdd(message)
-					} else {
-						// flush multiline buf + start over
-						//fmt.Printf("flushing multiline:\n%s\n, new multiline: %s\n", multilineBuf, message)
-						s, err := createJsonLog(ft.LogTemplate, streamState.MultiLineBuf, streamState.LastTimestamp)
-						if err != nil {
-							// TODO dropping log data here, add DLQ?
-							ft.ErrorChan <- fmt.Sprintf("Error building json log message: %v", err)
-						} else {
-							jsons = append(jsons, s)
-						}
-						streamState.BufReset()
-						streamState.BufAdd(message)
-					}
-					// don't update until prior multi-line flush uses it
-					streamState.LastTimestamp = timestamp
+				jsons = append(jsons, s)
+			}
+		} else {
+			timestamp := findTimestamp(message)
+			if timestamp != "" {
+				ft.log.Tracef(
+					logContext,
+					"Found message with timestamp: %s, msg: %s",
+					timestamp,
+					message,
+				)
+				if len(streamState.MultiLineBuf) == 0 {
+					ft.log.Tracef(
+						logContext,
+						"Beginning multiline, msg: %s",
+						message,
+					)
+					streamState.BufAdd(message)
 				} else {
-					if len(streamState.MultiLineBuf) == 0 {
-						// log fragment case, something wrong with parsing?
-						//fmt.Printf("log fragment case, msg: %s\n", message)
-						header := createFragmentHeader(streamState.LastTimestamp)
-						streamState.BufAdd(header)
-						streamState.BufAdd(message)
+					// flush multiline buf + start over
+					ft.log.Tracef(
+						logContext,
+						"Flushing multiline:\n%s\n, new multiline: %s\n",
+						streamState.MultiLineBuf,
+						message,
+					)
+					l := createJsonLog(ft.logTemplate, streamState.MultiLineBuf, streamState.LastTimestamp)
+					s, err := l.ToJSON()
+					if err != nil {
+						ft.log.DeadLetterf(
+							logContext,
+							l,
+							"Error building json log message: %v",
+							err,
+						)
 					} else {
-						//fmt.Printf("appending to existing multiline, msg: %s\n", message)
-						streamState.BufAdd(message)
+						jsons = append(jsons, s)
 					}
+					streamState.BufReset()
+					streamState.BufAdd(message)
+				}
+				// don't update until prior multi-line flush uses it
+				streamState.LastTimestamp = timestamp
+			} else {
+				if len(streamState.MultiLineBuf) == 0 {
+					// log fragment -- bad parsing?
+					ft.log.Tracef(
+						logContext,
+						"Log fragment case, msg: %s",
+						message,
+					)
+					header := createFragmentHeader(streamState.LastTimestamp)
+					streamState.BufAdd(header)
+					streamState.BufAdd(message)
+				} else {
+					ft.log.Tracef(
+						logContext,
+						"Appending to existing multiline, msg: %s",
+						message,
+					)
+					streamState.BufAdd(message)
 				}
 			}
 		}
@@ -320,28 +384,18 @@ func createFragmentHeader(timestamp string) string {
 	return fmt.Sprintf("%s Log Fragment Header")
 }
 
-func wrapJsonLog(logTmpl NomadLog, line string) (string, error) {
+func wrapJsonLog(logTmpl NomadLog, line string) NomadLog {
 	data := getJSONMessage(line)
 	timestamp := findJsonTimestamp(data)
 	logTmpl.Data = data
 	logTmpl.Timestamp = timestamp
-
-	result, err := json.Marshal(logTmpl)
-	if err != nil {
-		return "", err
-	}
-	return string(result[:]), nil
+	return logTmpl
 }
 
-func createJsonLog(logTmpl NomadLog, lines []string, timestamp string) (string, error) {
+func createJsonLog(logTmpl NomadLog, lines []string, timestamp string) NomadLog {
 	logTmpl.Message = strings.Join(lines, "\n")
 	logTmpl.Timestamp = timestamp
-
-	result, err := json.Marshal(logTmpl)
-	if err != nil {
-		return "", err
-	}
-	return string(result[:]), nil
+	return logTmpl
 }
 
 // findJsonTimestamp looks at top level keys in a json log to find a timestamp.

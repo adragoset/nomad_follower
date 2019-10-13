@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
@@ -10,32 +8,35 @@ import (
 type FollowedAllocation struct {
 	Alloc      *nomadApi.Allocation
 	Nomad      NomadConfig
-	ErrorChan  chan string
 	OutputChan chan string
 	Quit       chan struct{}
 	Tasks      []*FollowedTask
+	log        Logger
 }
 
 //NewFollowedAllocation creates a new followed allocation
-func NewFollowedAllocation(alloc *nomadApi.Allocation, nomad NomadConfig, errorChan chan string, outChan chan string) *FollowedAllocation {
+func NewFollowedAllocation(alloc *nomadApi.Allocation, nomad NomadConfig, outChan chan string, logger Logger) *FollowedAllocation {
 	return &FollowedAllocation{
 		Alloc: alloc,
 		Nomad: nomad,
-		ErrorChan: errorChan,
 		OutputChan: outChan,
 		Quit: make(chan struct{}),
 		Tasks: make([]*FollowedTask, 0),
+		log: logger,
 	}
 }
 
 //Start starts following an allocation
 func (f *FollowedAllocation) Start() {
-	message := fmt.Sprintf("Following Allocation: %s ID:%s", f.Alloc.Name, f.Alloc.ID)
-	message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-	_, _ = fmt.Println(message)
+	f.log.Debugf(
+		"FollowedAllocation.Start",
+		"Following Allocation: %s ID: %s",
+		f.Alloc.Name,
+		f.Alloc.ID,
+	)
 	for _, tg := range f.Alloc.Job.TaskGroups {
 		for _, task := range tg.Tasks {
-			ft := NewFollowedTask(f.Alloc, f.Nomad, f.ErrorChan, f.OutputChan, f.Quit, task)
+			ft := NewFollowedTask(f.Alloc, f.Nomad, f.Quit, task, f.OutputChan, f.log)
 			ft.Start()
 			f.Tasks = append(f.Tasks, ft)
 		}
@@ -44,8 +45,11 @@ func (f *FollowedAllocation) Start() {
 
 //Stop stops tailing all allocation tasks
 func (f *FollowedAllocation) Stop() {
-	message := fmt.Sprintf("Stopping Allocation: %s ID:%s", f.Alloc.Name, f.Alloc.ID)
-	message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-	_, _ = fmt.Println(message)
+	f.log.Debugf(
+		"FollowedAllocation.Stop",
+		"Stopping Allocation: %s ID: %s",
+		f.Alloc.Name,
+		f.Alloc.ID,
+	)
 	close(f.Quit)
 }

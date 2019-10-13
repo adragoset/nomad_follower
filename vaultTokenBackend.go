@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
@@ -18,8 +17,7 @@ type NomadConfig interface {
 type NomadEnvAuth struct {
 	client *nomadApi.Client
 	config *nomadApi.Config
-	// cannot use ErrCh during setup or deadlock
-	errCh chan string
+	log Logger
 }
 
 // Client returns a pointer to the internal Nomad client struct.
@@ -33,7 +31,7 @@ func (n *NomadEnvAuth) RenewToken() {
 }
 
 // NewNomadEnvAuth returns a new standard-auth config relying on $NOMAD_TOKEN.
-func NewNomadEnvAuth(errCh chan string, nomadConfig *nomadApi.Config) *NomadEnvAuth {
+func NewNomadEnvAuth(nomadConfig *nomadApi.Config, logger Logger) *NomadEnvAuth {
 	var n = NomadEnvAuth{}
 	var err error
 	if nomadConfig == nil {
@@ -43,11 +41,10 @@ func NewNomadEnvAuth(errCh chan string, nomadConfig *nomadApi.Config) *NomadEnvA
 	}
 	n.client, err = nomadApi.NewClient(n.config)
 	if err != nil {
-		//TODO make json
-		fmt.Println("Failed to create Nomad client.")
+		logger.Error("NewNomadEnvAuth", "Failed to create Nomad client.")
 		return nil
 	}
-	n.errCh = errCh
+	n.log = logger
 	return &n
 }
 
@@ -55,7 +52,7 @@ func NewNomadEnvAuth(errCh chan string, nomadConfig *nomadApi.Config) *NomadEnvA
 type NomadRenewableAuth struct {
 	client *nomadApi.Client
 	config *nomadApi.Config
-	errCh chan string
+	log Logger
 
 	vaultClient *vaultApi.Client
 	vaultConfig *vaultApi.Config
@@ -72,41 +69,44 @@ func (n *NomadRenewableAuth) Client() *nomadApi.Client {
 
 // RenewToken uses a Vault Nomad secrets backend to create a new Nomad token.
 func (n *NomadRenewableAuth) RenewToken() {
+	logContext := "NomadRenewableAuth.RenewToken"
 	// check if circuit breaker tripped on token renewal
 	t := time.Now()
 	past := t.Sub(n.lastRenewTime)
 	if past < n.circuitBreak {
+		n.log.Trace(logContext, "Circuit breaker already tripped, skipping request")
 		return
 	}
 	vaultReader := n.vaultClient.Logical()
 	resp, err := vaultReader.Read(n.nomadTokenBackend)
 	if err != nil {
-		n.errCh <- fmt.Sprintf("Error reading Nomad token backend: %s", err)
+		n.log.Errorf(logContext, "Error reading Nomad token backend: %s", err)
 		return
 	}
 
 	if resp == nil || resp.Data == nil || len(resp.Data) == 0 {
-		n.errCh <- fmt.Sprintf("Error no secret data at path.")
+		n.log.Error(logContext, "Error no secret data at path")
 		return
 	}
 
 	// pull out nomad token
 	token, ok := resp.Data["secret_id"].(string)
 	if !ok {
-		n.errCh <- fmt.Sprintf("Nomad token not string in Vault resp.")
+		n.log.Error(logContext, "Nomad token not string in Vault response")
 		return
 	}
 
 	// set in client
-	n.errCh <- fmt.Sprintf("Refreshed Nomad token from Vault.")
+	n.log.Debug(logContext, "Refreshed Nomad token from Vault")
 	n.client.SetSecretID(token)
 	n.lastRenewTime = time.Now()
 }
 
 // NewNomadRenewableAuth returns a config reliant on a Vault Nomad backend to provide auth tokens.
-func NewNomadRenewableAuth(tokenBackend string, errCh chan string, circuitBreak time.Duration, nomadConfig *nomadApi.Config, vaultConfig *vaultApi.Config) *NomadRenewableAuth {
+func NewNomadRenewableAuth(nomadConfig *nomadApi.Config, vaultConfig *vaultApi.Config, tokenBackend string, circuitBreak time.Duration, logger Logger) *NomadRenewableAuth {
 	var n = NomadRenewableAuth{}
 	var err error
+	logContext := "NewNomadRenewableAuth"
 	if nomadConfig == nil {
 		n.config = nomadApi.DefaultConfig()
 	} else {
@@ -120,18 +120,16 @@ func NewNomadRenewableAuth(tokenBackend string, errCh chan string, circuitBreak 
 	}
 	n.vaultClient, err = vaultApi.NewClient(n.vaultConfig)
 	if err != nil {
-		//TODO make json
-		fmt.Println("Failed to create Vault client.")
+		logger.Error(logContext, "Failed to create Vault client")
 		return nil
 	}
 	n.client, err = nomadApi.NewClient(n.config)
 	if err != nil {
-		//TODO make json
-		fmt.Println("Failed to create Nomad client.")
+		logger.Error(logContext, "Failed to create Nomad client")
 		return nil
 	}
 	n.nomadTokenBackend = tokenBackend
-	n.errCh = errCh
 	n.circuitBreak = circuitBreak
+	n.log = logger
 	return &n
 }

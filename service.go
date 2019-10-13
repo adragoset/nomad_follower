@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -12,14 +11,13 @@ import (
 
 var DEFAULT_CIRCUIT_BREAK = 60 * time.Second
 
+
 func main() {
-
-	createLogFile()
-
-	//setup the out channel and error channel
+	//setup the output channel
 	outChan := make(chan string)
-	errChan := make(chan string)
+	logger := Logger{verbosity: 20}
 
+	createLogFile(logger)
 	fileLogger := log.New(&lumberjack.Logger{
 		Filename:   os.Getenv("LOG_FILE"),
 		MaxSize:    50,
@@ -33,20 +31,20 @@ func main() {
 	var nomadConfig NomadConfig
 	nomadTokenBackend := os.Getenv("NOMAD_TOKEN_BACKEND")
 	if nomadTokenBackend == "" {
-		nomadConfig = NewNomadEnvAuth(errChan, config)
+		nomadConfig = NewNomadEnvAuth(config, logger)
 	} else {
 		nomadConfig = NewNomadRenewableAuth(
-			nomadTokenBackend,
-			errChan,
-			DEFAULT_CIRCUIT_BREAK,
 			config,
 			nil,
+			nomadTokenBackend,
+			DEFAULT_CIRCUIT_BREAK,
+			logger,
 		)
 	}
 
-	af, err := NewAllocationFollower(nomadConfig, outChan, errChan)
+	af, err := NewAllocationFollower(nomadConfig, outChan, logger)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
+		logger.Errorf("main", "Error creating Allocation Follower: %s", err)
 		return
 	}
 
@@ -57,15 +55,12 @@ func main() {
 			select {
 			case message := <-af.OutChan:
 				fileLogger.Println(message)
-
-			case err := <-af.ErrorChan:
-				fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
 			}
 		}
 	}
 }
 
-func createLogFile() {
+func createLogFile(logger Logger) {
 	path := os.Getenv("LOG_FILE")
 	// detect if file exists
 	var _, err = os.Stat(path)
@@ -74,10 +69,10 @@ func createLogFile() {
 	if os.IsNotExist(err) {
 		var file, err = os.Create(path)
 		if err != nil {
-			fmt.Errorf("Error creating log file Error:%v", err)
+			logger.Infof("createLogFile", "Error creating log file Error: %v", err)
+			return
 		}
 		defer file.Close()
 	}
-
-	fmt.Printf("{ \"message\":\"created log file: %s\"}\n", path)
+	logger.Infof("createLogFile", "Created log file: %s", path)
 }
