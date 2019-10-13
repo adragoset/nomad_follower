@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
@@ -11,25 +10,26 @@ import (
 type AllocationFollower struct {
 	Allocations map[string]*FollowedAllocation
 	Nomad       NomadConfig
-	ErrorChan   chan string
 	NodeID      string
 	OutChan     chan string
 	Quit        chan bool
 	Ticker      *time.Ticker
+	log         Logger
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(nomad NomadConfig, outChan chan string, errorChan chan string) (a *AllocationFollower, e error) {
+func NewAllocationFollower(nomad NomadConfig, outChan chan string, logger Logger) (a *AllocationFollower, e error) {
 	return &AllocationFollower{
 		Allocations: make(map[string]*FollowedAllocation),
 		Nomad: nomad,
-		ErrorChan: errorChan,
 		NodeID: "",
 		OutChan: outChan,
 		Quit: make(chan bool),
+		log: logger,
 	}, nil
 }
 
+// SetNodeID set the current Node's ID from the local Nomad agent.
 func (a *AllocationFollower) SetNodeID() error {
 	self, err := a.Nomad.Client().Agent().Self()
 	if err != nil {
@@ -41,17 +41,18 @@ func (a *AllocationFollower) SetNodeID() error {
 
 //Start registers and de registers allocation followers
 func (a *AllocationFollower) Start(duration time.Duration) {
+	logContext := "AllocationFollower.Start"
 	a.Ticker = time.NewTicker(duration)
 
 	go func() {
 		defer a.Ticker.Stop()
+		// TODO add defer a.Stop() ?
 
-		// run here while errChan is being read to not deadlock
 		a.Nomad.RenewToken()
 		err := a.SetNodeID()
 		if err != nil {
 			// cannot lookup allocations w/o node-id, hard fail
-			a.ErrorChan <- fmt.Sprintf("Could not fetch NodeID: %s", err)
+			a.log.Errorf(logContext, "Could not fetch NodeID: %s", err)
 			return
 		}
 		for {
@@ -59,13 +60,12 @@ func (a *AllocationFollower) Start(duration time.Duration) {
 			case <-a.Ticker.C:
 				err := a.collectAllocations()
 				if err != nil {
-					a.ErrorChan <- fmt.Sprintf("Error Collecting Allocations:%v", err)
+					a.log.Debugf(logContext, "Error Collecting Allocations: %v", err)
 					// TODO determine if any good way to differentiate 403 from other?
 					a.Nomad.RenewToken()
 				}
 			case <-a.Quit:
-				message := fmt.Sprintf("{ \"message\":\"%s\"}", "Stopping Allocation Follower")
-				_, _ = fmt.Println(message)
+				a.log.Info(logContext, "Stopping Allocation Follower")
 				return
 			}
 		}
@@ -82,10 +82,7 @@ func (a *AllocationFollower) Stop() {
 }
 
 func (a *AllocationFollower) collectAllocations() error {
-	message := fmt.Sprintf("Collecting Allocations")
-	message = fmt.Sprintf("{ \"message\":\"%s\"}", message)
-	_, _ = fmt.Println(message)
-
+	a.log.Debug("AllocationFollower.collectAllocations", "Collecting Allocations")
 	nodeReader := a.Nomad.Client().Nodes()
 	allocs, _, err := nodeReader.Allocations(a.NodeID, &nomadApi.QueryOptions{})
 
@@ -96,7 +93,7 @@ func (a *AllocationFollower) collectAllocations() error {
 	for _, alloc := range allocs {
 		record := a.Allocations[alloc.ID]
 		if record == nil && (alloc.DesiredStatus == "run" || alloc.ClientStatus == "running") {
-			falloc := NewFollowedAllocation(alloc, a.Nomad, a.ErrorChan, a.OutChan)
+			falloc := NewFollowedAllocation(alloc, a.Nomad, a.OutChan, a.log)
 			falloc.Start()
 			a.Allocations[alloc.ID] = falloc
 		}
