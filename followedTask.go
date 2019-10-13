@@ -280,86 +280,87 @@ func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState 
 	messages := strings.Split(string(frame.Data[:]), "\n")
 	jsons := make([]string, 0, INITIAL_OUTPUT_CAP)
 	for _, message := range messages {
-		if message != "" && message != "\n" {
-			if isJSON(message) {
+		if message == "" || message == "\n" {
+			continue
+		}
+		if isJSON(message) {
+			ft.log.Tracef(
+				logContext,
+				"Found single-line json log: %s",
+				message,
+			)
+			// no multi-line buffering for valid single-line json
+			l := wrapJsonLog(ft.logTemplate, message)
+			s, err := l.ToJSON()
+			if err != nil {
+				ft.log.DeadLetterf(
+					logContext,
+					l,
+					"Error building log message JSON Error: %v",
+					err,
+				)
+			} else {
+				jsons = append(jsons, s)
+			}
+		} else {
+			timestamp := findTimestamp(message)
+			if timestamp != "" {
 				ft.log.Tracef(
 					logContext,
-					"Found single-line json log: %s",
+					"Found message with timestamp: %s, msg: %s",
+					timestamp,
 					message,
 				)
-				// no multi-line buffering for valid single-line json
-				l := wrapJsonLog(ft.logTemplate, message)
-				s, err := l.ToJSON()
-				if err != nil {
-					ft.log.DeadLetterf(
-						logContext,
-						l,
-						"Error building log message JSON Error: %v",
-						err,
-					)
-				} else {
-					jsons = append(jsons, s)
-				}
-			} else {
-				timestamp := findTimestamp(message)
-				if timestamp != "" {
+				if len(streamState.MultiLineBuf) == 0 {
 					ft.log.Tracef(
 						logContext,
-						"Found message with timestamp: %s, msg: %s",
-						timestamp,
+						"Beginning multiline, msg: %s",
 						message,
 					)
-					if len(streamState.MultiLineBuf) == 0 {
-						ft.log.Tracef(
-							logContext,
-							"Beginning multiline, msg: %s",
-							message,
-						)
-						streamState.BufAdd(message)
-					} else {
-						// flush multiline buf + start over
-						ft.log.Tracef(
-							logContext,
-							"Flushing multiline:\n%s\n, new multiline: %s\n",
-							streamState.MultiLineBuf,
-							message,
-						)
-						l := createJsonLog(ft.logTemplate, streamState.MultiLineBuf, streamState.LastTimestamp)
-						s, err := l.ToJSON()
-						if err != nil {
-							ft.log.DeadLetterf(
-								logContext,
-								l,
-								"Error building json log message: %v",
-								err,
-							)
-						} else {
-							jsons = append(jsons, s)
-						}
-						streamState.BufReset()
-						streamState.BufAdd(message)
-					}
-					// don't update until prior multi-line flush uses it
-					streamState.LastTimestamp = timestamp
+					streamState.BufAdd(message)
 				} else {
-					if len(streamState.MultiLineBuf) == 0 {
-						// log fragment -- bad parsing?
-						ft.log.Tracef(
+					// flush multiline buf + start over
+					ft.log.Tracef(
+						logContext,
+						"Flushing multiline:\n%s\n, new multiline: %s\n",
+						streamState.MultiLineBuf,
+						message,
+					)
+					l := createJsonLog(ft.logTemplate, streamState.MultiLineBuf, streamState.LastTimestamp)
+					s, err := l.ToJSON()
+					if err != nil {
+						ft.log.DeadLetterf(
 							logContext,
-							"Log fragment case, msg: %s",
-							message,
+							l,
+							"Error building json log message: %v",
+							err,
 						)
-						header := createFragmentHeader(streamState.LastTimestamp)
-						streamState.BufAdd(header)
-						streamState.BufAdd(message)
 					} else {
-						ft.log.Tracef(
-							logContext,
-							"Appending to existing multiline, msg: %s",
-							message,
-						)
-						streamState.BufAdd(message)
+						jsons = append(jsons, s)
 					}
+					streamState.BufReset()
+					streamState.BufAdd(message)
+				}
+				// don't update until prior multi-line flush uses it
+				streamState.LastTimestamp = timestamp
+			} else {
+				if len(streamState.MultiLineBuf) == 0 {
+					// log fragment -- bad parsing?
+					ft.log.Tracef(
+						logContext,
+						"Log fragment case, msg: %s",
+						message,
+					)
+					header := createFragmentHeader(streamState.LastTimestamp)
+					streamState.BufAdd(header)
+					streamState.BufAdd(message)
+				} else {
+					ft.log.Tracef(
+						logContext,
+						"Appending to existing multiline, msg: %s",
+						message,
+					)
+					streamState.BufAdd(message)
 				}
 			}
 		}
