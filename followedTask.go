@@ -211,7 +211,7 @@ func (ft *FollowedTask) Start(save *SavedTask) {
 						ft.OutputChan <- message
 					}
 					// TODO handle log file deletion + truncation events
-					ft.log.Debugf(
+					ft.log.Tracef(
 						logContext,
 						"StdErr Data size: %d Offsets Prior Total: %d Calculated: %d Reported: %d",
 						len(stdErrFrame.Data),
@@ -235,7 +235,7 @@ func (ft *FollowedTask) Start(save *SavedTask) {
 						ft.OutputChan <- message
 					}
 					// TODO handle log file deletion + truncation events
-					ft.log.Debugf(
+					ft.log.Tracef(
 						logContext,
 						"StdOut Data size: %d Offsets Prior Total: %d Calculated: %d Reported: %d",
 						len(stdOutFrame.Data),

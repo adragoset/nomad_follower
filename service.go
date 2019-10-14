@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
@@ -21,12 +22,21 @@ var MAX_LOG_AGE = 1
 var NOMAD_MAX_WAIT = 5 * time.Minute
 var ALLOC_REFRESH_TICK = time.Second * 30
 
-var DEFAULT_VERBOSITY = DEBUG
+var DEFAULT_VERBOSITY = INFO
 
 func main() {
 	//setup the output channel
 	outChan := make(chan string)
-	logger := Logger{verbosity: DEFAULT_VERBOSITY}
+
+	var verbosity LogLevel
+	verbose := os.Getenv("VERBOSE")
+	i, err := strconv.Atoi(verbose)
+	if err != nil {
+		verbosity = DEFAULT_VERBOSITY
+	} else {
+		verbosity = LogLevel(i)
+	}
+	logger := Logger{verbosity: verbosity}
 
 	logFile := os.Getenv("LOG_FILE")
 	if logFile == "" {
