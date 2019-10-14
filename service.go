@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	nomadApi "github.com/hashicorp/nomad/api"
@@ -11,22 +12,52 @@ import (
 
 var DEFAULT_CIRCUIT_BREAK = 60 * time.Second
 
+var DEFAULT_LOG_FILE = "nomad.log"
+var DEFAULT_SAVE_FILE = "nomad-follower.json"
+
+var MAX_LOG_SIZE = 50
+var MAX_LOG_BACKUPS = 1
+var MAX_LOG_AGE = 1
+
+var NOMAD_MAX_WAIT = 5 * time.Minute
+var ALLOC_REFRESH_TICK = time.Second * 30
+
+var DEFAULT_VERBOSITY = INFO
 
 func main() {
 	//setup the output channel
 	outChan := make(chan string)
-	logger := Logger{verbosity: 20}
 
-	createLogFile(logger)
+	var verbosity LogLevel
+	verbose := os.Getenv("VERBOSE")
+	i, err := strconv.Atoi(verbose)
+	if err != nil {
+		verbosity = DEFAULT_VERBOSITY
+	} else {
+		verbosity = LogLevel(i)
+	}
+	logger := Logger{verbosity: verbosity}
+
+	logFile := os.Getenv("LOG_FILE")
+	if logFile == "" {
+		logFile = DEFAULT_LOG_FILE
+	}
+
+	saveFile := os.Getenv("SAVE_FILE")
+	if saveFile == "" {
+		saveFile = DEFAULT_SAVE_FILE
+	}
+
+	createLogFile(logFile, logger)
 	fileLogger := log.New(&lumberjack.Logger{
-		Filename:   os.Getenv("LOG_FILE"),
-		MaxSize:    50,
-		MaxBackups: 1,
-		MaxAge:     1,
+		Filename:   logFile,
+		MaxSize:    MAX_LOG_SIZE,
+		MaxBackups: MAX_LOG_BACKUPS,
+		MaxAge:     MAX_LOG_AGE,
 	}, "", 0)
 
 	config := nomadApi.DefaultConfig()
-	config.WaitTime = 5 * time.Minute
+	config.WaitTime = NOMAD_MAX_WAIT
 
 	var nomadConfig NomadConfig
 	nomadTokenBackend := os.Getenv("NOMAD_TOKEN_BACKEND")
@@ -48,7 +79,7 @@ func main() {
 		return
 	}
 
-	af.Start(time.Second * 30)
+	af.Start(ALLOC_REFRESH_TICK, saveFile)
 
 	if af != nil {
 		for {
@@ -60,19 +91,22 @@ func main() {
 	}
 }
 
-func createLogFile(logger Logger) {
-	path := os.Getenv("LOG_FILE")
+func createLogFile(logFile string, logger Logger) {
 	// detect if file exists
-	var _, err = os.Stat(path)
+	var _, err = os.Stat(logFile)
 
 	// create file if not exists
 	if os.IsNotExist(err) {
-		var file, err = os.Create(path)
+		var file, err = os.Create(logFile)
 		if err != nil {
-			logger.Infof("createLogFile", "Error creating log file Error: %v", err)
+			logger.Infof(
+				"createLogFile",
+				"Error creating log file Error: %v",
+				err,
+			)
 			return
 		}
 		defer file.Close()
 	}
-	logger.Infof("createLogFile", "Created log file: %s", path)
+	logger.Infof("createLogFile", "Created log file: %s", logFile)
 }
