@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
@@ -36,10 +37,11 @@ func (f *FollowedAllocation) Start(save *SavedAlloc) {
 	)
 	for _, tg := range f.Alloc.Job.TaskGroups {
 		for _, task := range tg.Tasks {
-			ft := NewFollowedTask(f.Alloc, f.Nomad, f.Quit, task, f.OutputChan, f.log)
+			ft := NewFollowedTask(f.Alloc, *tg.Name, task, f.Nomad, f.Quit, f.OutputChan, f.log)
 			if save != nil {
 				f.log.Debug("FollowedAllocation.Start", "Restoring saved allocation data")
-				savedTask := save.SavedTasks[task.Name]
+				key := fmt.Sprintf("%s:%s", *tg.Name, task.Name)
+				savedTask := save.SavedTasks[key]
 				ft.Start(&savedTask)
 			} else {
 				ft.Start(nil)

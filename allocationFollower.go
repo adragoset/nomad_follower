@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
@@ -23,7 +24,7 @@ type SavedAlloc struct {
 }
 
 type SavedTask struct {
-	Name string `json:"task_name"`
+	Key string `json:"key"`
 	StdOutOffsets map[string]int64 `json:"stdout_offsets"`
 	StdErrOffsets map[string]int64 `json:"stderr_offsets"`
 }
@@ -138,12 +139,14 @@ func (a *AllocationFollower) createSavePoint(path string) {
 			taskSave := SavedTask{}
 			taskSave.StdErrOffsets = make(map[string]int64)
 			taskSave.StdOutOffsets = make(map[string]int64)
-			taskSave.Name = task.Task.Name
-			//taskSave.GroupName = task.TaskGroupName
+			taskSave.Key = fmt.Sprintf(
+				"%s:%s",
+				task.TaskGroup,
+				task.Task.Name,
+			)
 			taskSave.StdErrOffsets = task.errState.FileOffsets
 			taskSave.StdOutOffsets = task.outState.FileOffsets
-			// TODO add TG name as part of name (prevent task name clash)
-			allocSave.SavedTasks[task.Task.Name] = taskSave
+			allocSave.SavedTasks[taskSave.Key] = taskSave
 		}
 		savePoint.SavedAllocs[allocId] = allocSave
 	}

@@ -54,10 +54,11 @@ func (n *NomadLog) ToJSON() (string, error) {
 //FollowedTask a container for a followed task log process
 type FollowedTask struct {
 	Alloc       *nomadApi.Allocation
-	Nomad       NomadConfig
-	OutputChan  chan string
-	Quit        chan struct{}
+	TaskGroup   string
 	Task        *nomadApi.Task
+	Nomad       NomadConfig
+	Quit        chan struct{}
+	OutputChan  chan string
 	log         Logger
 	logTemplate NomadLog
 	errState    StreamState
@@ -65,13 +66,14 @@ type FollowedTask struct {
 }
 
 //NewFollowedTask creates a new followed task
-func NewFollowedTask(alloc *nomadApi.Allocation, nomad NomadConfig, quit chan struct{}, task *nomadApi.Task, output chan string, logger Logger) *FollowedTask {
+func NewFollowedTask(alloc *nomadApi.Allocation, taskGroup string, task *nomadApi.Task, nomad NomadConfig, quit chan struct{}, output chan string, logger Logger) *FollowedTask {
 	logTemplate := createLogTemplate(alloc, task)
 	return &FollowedTask{
 		Alloc: alloc,
+		TaskGroup: taskGroup,
+		Task: task,
 		Nomad: nomad,
 		Quit: quit,
-		Task: task,
 		OutputChan: output,
 		log: logger,
 		logTemplate: logTemplate,
