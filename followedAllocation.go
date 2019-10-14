@@ -27,7 +27,7 @@ func NewFollowedAllocation(alloc *nomadApi.Allocation, nomad NomadConfig, outCha
 }
 
 //Start starts following an allocation
-func (f *FollowedAllocation) Start() {
+func (f *FollowedAllocation) Start(save *SavedAlloc) {
 	f.log.Debugf(
 		"FollowedAllocation.Start",
 		"Following Allocation: %s ID: %s",
@@ -37,7 +37,13 @@ func (f *FollowedAllocation) Start() {
 	for _, tg := range f.Alloc.Job.TaskGroups {
 		for _, task := range tg.Tasks {
 			ft := NewFollowedTask(f.Alloc, f.Nomad, f.Quit, task, f.OutputChan, f.log)
-			ft.Start()
+			if save != nil {
+				f.log.Debug("FollowedAllocation.Start", "Restoring saved allocation data")
+				savedTask := save.SavedTasks[task.Name]
+				ft.Start(&savedTask)
+			} else {
+				ft.Start(nil)
+			}
 			f.Tasks = append(f.Tasks, ft)
 		}
 	}

@@ -22,6 +22,9 @@ var MAX_TIMESTAMP_START_POS = 4
 // MULTILINE_BUF_CAP is the slice capacity of new buffers to aggregate multi-line logs.
 var MULTILINE_BUF_CAP = 10
 
+// BACKOFF_DELAY rate-limits streaming logs of tasks that error (BACKOFF_DELAY << error-count) seconds
+var BACKOFF_DELAY = 8
+
 // NomadLog annotates task log data with metadata from Nomad about the task
 // and allocation.  A timestamp is parsed out of the message body and string log
 // ouput is preserved under the 'message' field and JSON log output is nested
@@ -57,6 +60,8 @@ type FollowedTask struct {
 	Task        *nomadApi.Task
 	log         Logger
 	logTemplate NomadLog
+	errState    StreamState
+	outState    StreamState
 }
 
 //NewFollowedTask creates a new followed task
@@ -77,7 +82,7 @@ type StreamState struct {
 	MultiLineBuf []string
 	LastTimestamp string
 	ConsecErrors uint
-	FileOffset int64
+	FileOffsets map[string]int64
 	// internal use only
 	initialBufferCap int
 	quit chan struct{}
@@ -92,8 +97,23 @@ func (s *StreamState) BufReset() {
 	s.MultiLineBuf = make([]string, 0, s.initialBufferCap)
 }
 
+func (s *StreamState) SetOffsets(offsets map[string]int64) {
+	s.FileOffsets = offsets
+}
+
+// GetOffset returns the current total log stream offset.
+func (s *StreamState) GetOffset() int64 {
+	var offset int64
+	offset = 0
+	// sum the byte offsets for all of the file streams
+	for _, o := range s.FileOffsets {
+		offset += o
+	}
+	return offset
+}
+
 func (s *StreamState) Start(alloc *nomadApi.Allocation, task, logType string) (<-chan *nomadApi.StreamFrame, <-chan error) {
-	return s.allocFS.Logs(alloc, true, task, logType, "start", s.FileOffset, s.quit, &nomadApi.QueryOptions{})
+	return s.allocFS.Logs(alloc, true, task, logType, "start", s.GetOffset(), s.quit, &nomadApi.QueryOptions{})
 }
 
 func NewStreamState(allocFS *nomadApi.AllocFS, quit chan struct{}, initialBufferCap int) StreamState {
@@ -102,11 +122,41 @@ func NewStreamState(allocFS *nomadApi.AllocFS, quit chan struct{}, initialBuffer
 	s.quit = quit
 	s.allocFS = allocFS
 	s.MultiLineBuf = make([]string, 0, initialBufferCap)
+	s.FileOffsets = make(map[string]int64)
 	return s
 }
 
+// SpeculativeOffset returns the total log stream offset if file had a given offset.
+// Function exists primarily for debugging purposes.
+func SpeculativeOffset(state StreamState, file string, offset int64) int64 {
+	var speculativeOffset int64
+	speculativeOffset = offset
+	for f, o := range state.FileOffsets {
+		if f == file {
+			continue
+		}
+		speculativeOffset += o
+	}
+	return speculativeOffset
+}
+
+// CalculateOffset returns the total log stream offset based on given message size.
+// Function exists primarily for debugging purposes.
+func CalculateOffset(state StreamState, file string, size int64) int64 {
+	var calculatedOffset int64
+	calculatedOffset = 0
+	for f, o := range state.FileOffsets {
+		if f == file {
+			calculatedOffset += o + size
+			continue
+		}
+		calculatedOffset += o
+	}
+	return calculatedOffset
+}
+
 //Start starts following a task for an allocation
-func (ft *FollowedTask) Start() {
+func (ft *FollowedTask) Start(save *SavedTask) {
 	//config := nomadApi.DefaultConfig()
 	//config.WaitTime = 5 * time.Minute
 	//client, err := nomadApi.NewClient(config)
@@ -117,18 +167,25 @@ func (ft *FollowedTask) Start() {
 
 	logContext := "FollowedTask.Start"
 	fs := ft.Nomad.Client().AllocFS()
-	var stdOutState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
-	var stdErrState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
-	stdOutStream, stdOutErr := stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
-	stdErrStream, stdErrErr := stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
+	ft.outState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
+	ft.errState = NewStreamState(fs, ft.Quit, MULTILINE_BUF_CAP)
+	if save != nil {
+		ft.log.Debugf(logContext, "Restoring log offsets for %s", ft.Task.Name)
+		ft.outState.SetOffsets(save.StdOutOffsets)
+		ft.errState.SetOffsets(save.StdErrOffsets)
+		ft.log.Debugf(logContext, "Set StdOut Offsets to %#v", ft.outState.FileOffsets)
+		ft.log.Debugf(logContext, "Set StdErr Offsets to %#v", ft.errState.FileOffsets)
+	}
+	stdOutCh, stdOutErr := ft.outState.Start(ft.Alloc, ft.Task.Name, "stdout")
+	stdErrCh, stdErrErr := ft.errState.Start(ft.Alloc, ft.Task.Name, "stderr")
 
 	go func() {
 		var messages []string
 		for {
 			// TODO need some max possible sleep duration
 			// Keeps dead allocs from crash looping (until 403/404 error differentiated)
-			if stdOutState.ConsecErrors > 0 || stdErrState.ConsecErrors > 0 {
-				delay := 1 << (stdOutState.ConsecErrors + stdErrState.ConsecErrors)
+			if ft.outState.ConsecErrors > 0 || ft.errState.ConsecErrors > 0 {
+				delay := BACKOFF_DELAY << (ft.outState.ConsecErrors + ft.errState.ConsecErrors)
 				ft.log.Debugf(
 					logContext,
 					"Inserting delay of %ds for alloc: %s task: %s",
@@ -145,30 +202,52 @@ func (ft *FollowedTask) Start() {
 				if !ok {
 					return
 				}
-			case stdErrMsg, stdErrOk := <-stdErrStream:
+			case stdErrFrame, stdErrOk := <-stdErrCh:
 				if stdErrOk {
-					messages, stdErrState = ft.processMessage(stdErrMsg, stdErrState)
+					messages, ft.errState = ft.processFrame(stdErrFrame, ft.errState)
 					for _, message := range messages {
 						ft.OutputChan <- message
 					}
-					stdErrState.FileOffset = stdErrMsg.Offset
-					stdErrState.ConsecErrors = 0
+					// TODO handle log file deletion + truncation events
+					ft.log.Debugf(
+						logContext,
+						"StdErr Data size: %d Offsets Prior Total: %d Calculated: %d Reported: %d",
+						len(stdErrFrame.Data),
+						ft.errState.GetOffset(),
+						CalculateOffset(ft.errState, stdErrFrame.File, int64(len(stdErrFrame.Data))),
+						SpeculativeOffset(ft.errState, stdErrFrame.File, stdErrFrame.Offset),
+					)
+					// using reported offsets can lead to gaps when restoring a savepoint
+					ft.errState.FileOffsets[stdErrFrame.File] += int64(len(stdErrFrame.Data))
+					ft.errState.ConsecErrors = 0
+					ft.outState.ConsecErrors = 0
 				} else {
-					stdErrStream, stdErrErr = stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
-					stdErrState.ConsecErrors += 1
+					stdErrCh, stdErrErr = ft.errState.Start(ft.Alloc, ft.Task.Name, "stderr")
+					ft.errState.ConsecErrors += 1
 				}
 
-			case stdOutMsg, stdOutOk := <-stdOutStream:
+			case stdOutFrame, stdOutOk := <-stdOutCh:
 				if stdOutOk {
-					messages, stdOutState = ft.processMessage(stdOutMsg, stdOutState)
+					messages, ft.outState = ft.processFrame(stdOutFrame, ft.outState)
 					for _, message := range messages {
 						ft.OutputChan <- message
 					}
-					stdOutState.FileOffset = stdOutMsg.Offset
-					stdOutState.ConsecErrors = 0
+					// TODO handle log file deletion + truncation events
+					ft.log.Debugf(
+						logContext,
+						"StdOut Data size: %d Offsets Prior Total: %d Calculated: %d Reported: %d",
+						len(stdOutFrame.Data),
+						ft.outState.GetOffset(),
+						CalculateOffset(ft.outState, stdOutFrame.File, int64(len(stdOutFrame.Data))),
+						SpeculativeOffset(ft.outState, stdOutFrame.File, stdOutFrame.Offset),
+					)
+					// using reported offsets can lead to gaps when restoring a savepoint
+					ft.outState.FileOffsets[stdOutFrame.File] += int64(len(stdOutFrame.Data))
+					ft.outState.ConsecErrors = 0
+					ft.errState.ConsecErrors = 0
 				} else {
-					stdOutStream, stdOutErr = stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
-					stdOutState.ConsecErrors += 1
+					stdOutCh, stdOutErr = ft.outState.Start(ft.Alloc, ft.Task.Name, "stdout")
+					ft.outState.ConsecErrors += 1
 				}
 
 
@@ -183,8 +262,8 @@ func (ft *FollowedTask) Start() {
 				// TODO handle 403 case separately from 404 case
 				// Handle task starting while client has invalid token
 				ft.Nomad.RenewToken()
-				stdErrStream, stdErrErr = stdErrState.Start(ft.Alloc, ft.Task.Name, "stderr")
-				stdErrState.ConsecErrors += 1
+				stdErrCh, stdErrErr = ft.errState.Start(ft.Alloc, ft.Task.Name, "stderr")
+				ft.errState.ConsecErrors += 1
 
 			case outErr := <-stdOutErr:
 				ft.log.Debugf(
@@ -197,8 +276,8 @@ func (ft *FollowedTask) Start() {
 				// TODO handle 403 case separately from 404 case
 				// Handle task starting while client has invalid token
 				ft.Nomad.RenewToken()
-				stdOutStream, stdOutErr = stdOutState.Start(ft.Alloc, ft.Task.Name, "stdout")
-				stdOutState.ConsecErrors += 1
+				stdOutCh, stdOutErr = ft.outState.Start(ft.Alloc, ft.Task.Name, "stdout")
+				ft.outState.ConsecErrors += 1
 			}
 		}
 	}()
@@ -253,7 +332,7 @@ func getServiceTagMap(service nomadApi.Service) (map[string]string) {
 	return serviceTagMap
 }
 
-// processMessage takes a single log line and determines if it is JSON, or a single or multi-line log.
+// processFrame takes a frame and determines if each line is JSON, or a single or multi-line log.
 //
 // Requirements of operation:
 // - JSON logs must be on a single line to be properly parsed aka newlines escaped if included
@@ -275,8 +354,8 @@ func getServiceTagMap(service nomadApi.Service) (map[string]string) {
 //     add line to multiline buf + continue
 // Note: last timestamp and multiline buffer must be passed to and received from the calling
 //       function to properly mark timestamps and group logs between calls.
-func (ft *FollowedTask) processMessage(frame *nomadApi.StreamFrame, streamState StreamState) ([]string, StreamState) {
-	logContext := "FollowedTask.processMessage"
+func (ft *FollowedTask) processFrame(frame *nomadApi.StreamFrame, streamState StreamState) ([]string, StreamState) {
+	logContext := "FollowedTask.processFrame"
 	messages := strings.Split(string(frame.Data[:]), "\n")
 	jsons := make([]string, 0, INITIAL_OUTPUT_CAP)
 	for _, message := range messages {
