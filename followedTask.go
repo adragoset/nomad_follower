@@ -100,7 +100,11 @@ func (s *StreamState) BufReset() {
 }
 
 func (s *StreamState) SetOffsets(offsets map[string]int64) {
-	s.FileOffsets = offsets
+	if offsets != nil {
+		s.FileOffsets = offsets
+	} else {
+		s.FileOffsets = make(map[string]int64)
+	}
 }
 
 // GetOffset returns the current total log stream offset.
