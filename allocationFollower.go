@@ -55,9 +55,9 @@ func NewAllocationFollower(nomad NomadConfig, logger Logger) (a *AllocationFollo
 func (a *AllocationFollower) SetNodeID() error {
 	logContext := "AllocationFollower.SetNodeID"
 	var err error
-	var delay time.Duration
 	var maxRetries = 3
 	for retryCount := 1; retryCount <= maxRetries; retryCount++ {
+		time.Sleep(retryCount * time.Second)
 		// reset err after each retry -- but leave final error set for return
 		err = nil
 		self, err := a.Nomad.Client().Agent().Self()
