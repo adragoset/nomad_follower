@@ -41,12 +41,11 @@ type AllocationFollower struct {
 }
 
 //NewAllocationFollower Creates a new allocation follower
-func NewAllocationFollower(nomad NomadConfig, outChan chan string, logger Logger) (a *AllocationFollower, e error) {
+func NewAllocationFollower(nomad NomadConfig, logger Logger) (a *AllocationFollower, e error) {
 	return &AllocationFollower{
 		Allocations: make(map[string]*FollowedAllocation),
 		Nomad: nomad,
 		NodeID: "",
-		OutChan: outChan,
 		Quit: make(chan bool),
 		log: logger,
 	}, nil
@@ -54,18 +53,30 @@ func NewAllocationFollower(nomad NomadConfig, outChan chan string, logger Logger
 
 // SetNodeID set the current Node's ID from the local Nomad agent.
 func (a *AllocationFollower) SetNodeID() error {
-	self, err := a.Nomad.Client().Agent().Self()
-	if err != nil {
-		return err
+	logContext := "AllocationFollower.SetNodeID"
+	var err error
+	var maxRetries = 3
+	for retryCount := 1; retryCount <= maxRetries; retryCount++ {
+		time.Sleep(time.Duration(retryCount) * time.Second)
+		// reset err after each retry -- but leave final error set for return
+		err = nil
+		self, err := a.Nomad.Client().Agent().Self()
+		if err != nil {
+			a.log.Debugf(logContext, "Unable to query Nomad self endpoint, retry %d of %d", retryCount, maxRetries)
+		} else {
+			a.NodeID = self.Stats["client"]["node_id"]
+			return nil
+		}
 	}
-	a.NodeID = self.Stats["client"]["node_id"]
-	return nil
+	a.log.Error(logContext, "Failed to query Nomad self endpoint, exiting")
+	return err
 }
 
 //Start registers and de registers allocation followers
-func (a *AllocationFollower) Start(duration time.Duration, savePath string) {
+func (a *AllocationFollower) Start(duration time.Duration, savePath string) (<-chan string) {
 	logContext := "AllocationFollower.Start"
 	a.Ticker = time.NewTicker(duration)
+	a.OutChan = make(chan string)
 
 	go func() {
 		defer a.Ticker.Stop()
@@ -76,6 +87,7 @@ func (a *AllocationFollower) Start(duration time.Duration, savePath string) {
 		if err != nil {
 			// cannot lookup allocations w/o node-id, hard fail
 			a.log.Errorf(logContext, "Could not fetch NodeID: %s", err)
+			close(a.OutChan)
 			return
 		}
 		savePoint := a.restoreSavePoint(savePath)
@@ -108,10 +120,12 @@ func (a *AllocationFollower) Start(duration time.Duration, savePath string) {
 					"Stopping Allocation Follower",
 				)
 				// TODO add a.Stop() here?
+				//close(a.OutChan) // cannot do until we know there are no more senders on it
 				return
 			}
 		}
 	}()
+	return a.OutChan
 }
 
 //Stop stops all followed allocations and exits

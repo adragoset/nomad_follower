@@ -25,9 +25,6 @@ var ALLOC_REFRESH_TICK = time.Second * 30
 var DEFAULT_VERBOSITY = INFO
 
 func main() {
-	//setup the output channel
-	outChan := make(chan string)
-
 	var verbosity LogLevel
 	verbose := os.Getenv("VERBOSE")
 	i, err := strconv.Atoi(verbose)
@@ -73,19 +70,24 @@ func main() {
 		)
 	}
 
-	af, err := NewAllocationFollower(nomadConfig, outChan, logger)
+	af, err := NewAllocationFollower(nomadConfig, logger)
 	if err != nil {
 		logger.Errorf("main", "Error creating Allocation Follower: %s", err)
 		return
 	}
 
-	af.Start(ALLOC_REFRESH_TICK, saveFile)
+	outChan := af.Start(ALLOC_REFRESH_TICK, saveFile)
 
 	if af != nil {
 		for {
 			select {
-			case message := <-af.OutChan:
-				fileLogger.Println(message)
+			case message, ok := <-outChan:
+				if ok {
+					fileLogger.Println(message)
+				} else {
+					logger.Info("main", "Allocation Follower fatal error, exiting.")
+					return
+				}
 			}
 		}
 	}
