@@ -1,62 +1,114 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
+	nomadApi "github.com/hashicorp/nomad/api"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+var DEFAULT_CIRCUIT_BREAK = 60 * time.Second
+
+var DEFAULT_LOG_FILE = "nomad.log"
+var DEFAULT_SAVE_FILE = "nomad-follower.json"
+
+var MAX_LOG_SIZE = 50
+var MAX_LOG_BACKUPS = 1
+var MAX_LOG_AGE = 1
+
+var NOMAD_MAX_WAIT = 5 * time.Minute
+var ALLOC_REFRESH_TICK = time.Second * 30
+
+var DEFAULT_VERBOSITY = INFO
+
 func main() {
-
-	createLogFile()
-
-	//setup the out channel and error channel
-	outChan := make(chan string)
-	errChan := make(chan string)
-
-	fileLogger := log.New(&lumberjack.Logger{
-		Filename:   os.Getenv("LOG_FILE"),
-		MaxSize:    50,
-		MaxBackups: 1,
-		MaxAge:     1,
-	}, "", 0)
-
-	af, err := NewAllocationFollower(outChan, errChan)
+	var verbosity LogLevel
+	verbose := os.Getenv("VERBOSE")
+	i, err := strconv.Atoi(verbose)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
+		verbosity = DEFAULT_VERBOSITY
+	} else {
+		verbosity = LogLevel(i)
+	}
+	logger := Logger{verbosity: verbosity}
+
+	logFile := os.Getenv("LOG_FILE")
+	if logFile == "" {
+		logFile = DEFAULT_LOG_FILE
 	}
 
-	af.Start(time.Second * 30)
+	saveFile := os.Getenv("SAVE_FILE")
+	if saveFile == "" {
+		saveFile = DEFAULT_SAVE_FILE
+	}
+
+	createLogFile(logFile, logger)
+	fileLogger := log.New(&lumberjack.Logger{
+		Filename:   logFile,
+		MaxSize:    MAX_LOG_SIZE,
+		MaxBackups: MAX_LOG_BACKUPS,
+		MaxAge:     MAX_LOG_AGE,
+	}, "", 0)
+
+	config := nomadApi.DefaultConfig()
+	config.WaitTime = NOMAD_MAX_WAIT
+
+	var nomadConfig NomadConfig
+	nomadTokenBackend := os.Getenv("NOMAD_TOKEN_BACKEND")
+	if nomadTokenBackend == "" {
+		nomadConfig = NewNomadEnvAuth(config, logger)
+	} else {
+		nomadConfig = NewNomadRenewableAuth(
+			config,
+			nil,
+			nomadTokenBackend,
+			DEFAULT_CIRCUIT_BREAK,
+			logger,
+		)
+	}
+
+	af, err := NewAllocationFollower(nomadConfig, logger)
+	if err != nil {
+		logger.Errorf("main", "Error creating Allocation Follower: %s", err)
+		return
+	}
+
+	outChan := af.Start(ALLOC_REFRESH_TICK, saveFile)
 
 	if af != nil {
 		for {
 			select {
-			case message := <-af.OutChan:
-				fileLogger.Println(message)
-
-			case err := <-af.ErrorChan:
-				fmt.Println(fmt.Sprintf("{ \"message\":\"%s\"}", err))
+			case message, ok := <-outChan:
+				if ok {
+					fileLogger.Println(message)
+				} else {
+					logger.Info("main", "Allocation Follower fatal error, exiting.")
+					return
+				}
 			}
 		}
 	}
 }
 
-func createLogFile() {
-	path := os.Getenv("LOG_FILE")
+func createLogFile(logFile string, logger Logger) {
 	// detect if file exists
-	var _, err = os.Stat(path)
+	var _, err = os.Stat(logFile)
 
 	// create file if not exists
 	if os.IsNotExist(err) {
-		var file, err = os.Create(path)
+		var file, err = os.Create(logFile)
 		if err != nil {
-			fmt.Errorf("Error creating log file Error:%v", err)
+			logger.Infof(
+				"createLogFile",
+				"Error creating log file Error: %v",
+				err,
+			)
+			return
 		}
 		defer file.Close()
 	}
-
-	fmt.Println("{ \"message\":\"==> done creating log file\"}", path)
+	logger.Infof("createLogFile", "Created log file: %s", logFile)
 }
