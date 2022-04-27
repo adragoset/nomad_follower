@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmwilcox/fuzzytime"
+	"github.com/bcampbell/fuzzytime"
 	nomadApi "github.com/hashicorp/nomad/api"
 )
 
